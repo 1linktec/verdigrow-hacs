@@ -193,7 +193,7 @@ class VerdiGrowPanel extends HTMLElement {
         .vg-cb{font-size:13px;display:flex;gap:6px;align-items:center}
       </style>
       <div class="vg-wrap">
-        <h1>VerdiGrow — Sensor Mapping</h1>
+        <h1>VerdiGrow Link — Sensor Mapping</h1>
         <p class="vg-help">Filter by HA area to cut the sensor list, expand a container (or an
           area), and pick a sensor for each metric. A sensor on a <strong>container</strong>
           (bed, row, pot, bucket, tray) is <em>dedicated</em>. A sensor on an <strong>area</strong>

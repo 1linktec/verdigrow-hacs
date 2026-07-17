@@ -22,7 +22,7 @@ STORAGE_VERSION = 1
 
 # Custom sidebar panel (the tree/filter mapping UI ships inside this integration)
 PANEL_URL = "verdigrow"
-PANEL_TITLE = "VerdiGrow"
+PANEL_TITLE = "VerdiGrow Link"
 PANEL_ICON = "mdi:sprout"
 STATIC_URL = "/verdigrow_static"
 
