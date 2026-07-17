@@ -17,7 +17,8 @@ from pathlib import Path
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr_helper
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -27,13 +28,15 @@ from .const import (CONF_INTERVAL, CONF_TOKEN, CONF_URL, CONF_VERIFY_SSL,
                     DEFAULT_INTERVAL, DOMAIN, PANEL_ICON, PANEL_TITLE, PANEL_URL,
                     STATIC_URL, STORAGE_KEY, STORAGE_VERSION,
                     TARGET_AREA, TARGET_CONTAINER)
+from .coordinator import VerdiGrowCoordinator
 from .http_api import (VerdiGrowAreasView, VerdiGrowCardsView,
                        VerdiGrowCatalogView, VerdiGrowMappingsView,
                        VerdiGrowPushView)
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[str] = []
+# Containers become HA devices with sensor + image entities on their area.
+PLATFORMS: list[str] = ["sensor", "image"]
 _UNAVAILABLE = ("unknown", "unavailable", "", None)
 
 
@@ -106,7 +109,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("VerdiGrow push failed: %s", e)
             return 0
 
-    hass.data[DOMAIN]["runtime"] = {"client": client, "store": store, "push": _push}
+    # Coordinator — polls containers so they show as HA devices/entities on
+    # their area. Renames flow through (device name from the card); deletes drop
+    # out of the data (their device is removed below); uninstall removes all
+    # entities (they're registered under this config entry).
+    interval = int(entry.options.get(CONF_INTERVAL, DEFAULT_INTERVAL))
+    coordinator = VerdiGrowCoordinator(hass, client, interval)
+    await coordinator.async_config_entry_first_refresh()
+
+    hass.data[DOMAIN]["runtime"] = {"client": client, "store": store, "push": _push,
+                                    "coordinator": coordinator}
+
+    @callback
+    def _manage_devices():
+        """Remove devices for containers deleted in VerdiGrow; keep names in sync."""
+        data = coordinator.data or {}
+        reg = dr_helper.async_get(hass)
+        for device in dr_helper.async_entries_for_config_entry(reg, entry.entry_id):
+            cid = None
+            for domain, ident in device.identifiers:
+                if domain == DOMAIN and ident.startswith("container_"):
+                    try:
+                        cid = int(ident.split("_", 1)[1])
+                    except ValueError:
+                        cid = None
+                    break
+            if cid is None:
+                continue
+            card = data.get(cid)
+            if card is None:
+                reg.async_remove_device(device.id)  # gone in VerdiGrow → remove
+            elif card.get("label") and device.name != card["label"] and not device.name_by_user:
+                reg.async_update_device(device.id, name=card["label"])  # renamed
+
+    entry.async_on_unload(coordinator.async_add_listener(_manage_devices))
 
     # Register the local HTTP endpoints the panel calls (once).
     if not hass.data[DOMAIN].get("_views"):
@@ -134,9 +170,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.data[DOMAIN]["_panel"] = True
 
-    interval = int(entry.options.get(CONF_INTERVAL, DEFAULT_INTERVAL))
     unsub = async_track_time_interval(hass, _push, timedelta(seconds=interval))
-    hass.data[DOMAIN][entry.entry_id] = {"unsub": unsub}
+    hass.data[DOMAIN][entry.entry_id] = {"unsub": unsub, "coordinator": coordinator}
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _manage_devices()  # prune any devices for containers already gone
 
     entry.async_on_unload(entry.add_update_listener(_reload_on_options))
     hass.async_create_task(_push())
@@ -148,6 +186,7 @@ async def _reload_on_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if data and data.get("unsub"):
         data["unsub"]()
@@ -159,4 +198,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if hass.data.get(DOMAIN, {}).pop("_panel", False):
             from homeassistant.components import frontend
             frontend.async_remove_panel(hass, PANEL_URL)
-    return True
+    return unloaded
