@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (API_AREAS, API_CONTAINERS, API_METRIC_TYPES, API_PING,
-                    API_PLANTS, API_READINGS)
+                    API_PLANTS, API_READINGS, API_SENSOR_LINKS)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +55,11 @@ class VerdiGrowClient:
 
     async def async_metric_types(self) -> list[dict]:
         return (await self._get(API_METRIC_TYPES)).get("metric_types", [])
+
+    async def async_sensor_links(self) -> list[dict]:
+        """The sensor map authored in VerdiGrow's console. Each link:
+        {entity_id, metric, container_id?, area_id?, kind}."""
+        return (await self._get(API_SENSOR_LINKS)).get("sensor_links", [])
 
     async def async_push(self, readings: list[dict]) -> dict:
         """POST a batch of readings. Each: {metric, value, occurred_at?, entity_id?,

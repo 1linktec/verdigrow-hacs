@@ -22,56 +22,12 @@
   "options": {
     "step": {
       "init": {
-        "title": "VerdiGrow options",
-        "menu_options": {
-          "map_area": "Link an HA area to VerdiGrow",
-          "add_mapping": "Add a sensor mapping",
-          "remove_mapping": "Remove sensor mappings",
-          "interval": "Update frequency"
-        }
-      },
-      "interval": {
-        "title": "Update frequency",
+        "title": "VerdiGrow — update frequency",
+        "description": "Map your HA sensors to VerdiGrow metrics in VerdiGrow's console (Sensor Mapping). This integration pulls that map and pushes readings on the interval below. Default is once an hour — don't set it too low or you'll flood the database.",
         "data": {
           "update_interval": "Seconds between pushes"
         }
-      },
-      "add_mapping": {
-        "title": "Add a sensor mapping — step 1 of 2",
-        "description": "Pick which linked HA area to work in. This filters the sensor list on the next screen to the entities in that HA area.",
-        "data": {
-          "ha_area": "HA area (filter)"
-        }
-      },
-      "map_entity": {
-        "title": "Add a sensor mapping — step 2 of 2",
-        "description": "Sensors in {area}. Pick one HA sensor, the VerdiGrow target(s) it feeds (areas, containers or plants in this HA area), and which metric it is.",
-        "data": {
-          "entity_id": "HA sensor",
-          "metric": "Metric",
-          "targets": "VerdiGrow target(s) — area, container or plant"
-        }
-      },
-      "remove_mapping": {
-        "title": "Remove mappings",
-        "data": {
-          "remove": "Select mappings to remove"
-        }
-      },
-      "map_area": {
-        "title": "Link an HA area to VerdiGrow",
-        "description": "Pick a Home Assistant area and the VerdiGrow container(s)/area(s) it covers. This scopes the sensor list so the picker only shows sensors from linked HA areas.",
-        "data": {
-          "ha_area": "Home Assistant area",
-          "targets": "VerdiGrow targets (one or more)"
-        }
       }
-    },
-    "abort": {
-      "cannot_connect": "Could not reach VerdiGrow to load containers/areas.",
-      "no_mappings": "There are no mappings to remove yet.",
-      "map_area_first": "Link an HA area to VerdiGrow first (so the sensor list can be scoped).",
-      "no_entities_in_areas": "No sensors found in the linked HA area(s)."
     }
   }
 }

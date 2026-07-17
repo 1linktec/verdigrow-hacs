@@ -1,9 +1,10 @@
 """
 VerdiGrow — Home Assistant integration.
 
-Push model: HA is the sensor hub. This integration reads the mapped HA entity
-states and PUSHES readings to VerdiGrow's ingest API on a configurable interval
-(default 1 hour). VerdiGrow only stores metrics — it never pulls from HA.
+Push model: HA is the sensor hub. The sensor→metric map is authored in
+VerdiGrow's console (Sensor Mapping). This integration PULLS that map, reads the
+mapped HA entity states, and PUSHES readings to VerdiGrow's ingest API on a
+configurable interval (default 1 hour). VerdiGrow never pulls readings from HA.
 No hardware access; no dashboards rendered here.
 """
 
@@ -18,9 +19,8 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from .api import VerdiGrowClient, VerdiGrowError
-from .const import (CONF_INTERVAL, CONF_MAPPINGS, CONF_TOKEN, CONF_URL,
-                    CONF_VERIFY_SSL, DEFAULT_INTERVAL, DOMAIN, TARGET_AREA,
-                    TARGET_CONTAINER, TARGET_PLANT)
+from .const import (CONF_INTERVAL, CONF_TOKEN, CONF_URL, CONF_VERIFY_SSL,
+                    DEFAULT_INTERVAL, DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,11 +37,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     async def _push(_now=None):
-        mappings = entry.options.get(CONF_MAPPINGS, [])
-        if not mappings:
+        # Pull the sensor map authored in VerdiGrow's console.
+        try:
+            links = await client.async_sensor_links()
+        except VerdiGrowError as e:
+            _LOGGER.warning("VerdiGrow: could not fetch sensor map: %s", e)
+            return
+        if not links:
             return
         readings = []
-        for m in mappings:
+        for m in links:
             state = hass.states.get(m["entity_id"])
             if state is None or state.state in _UNAVAILABLE:
                 continue
@@ -52,18 +57,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             r = {"metric": m["metric"], "value": value,
                  "occurred_at": dt_util.utcnow().isoformat(),
                  "entity_id": m["entity_id"]}
-            if m["target"] == TARGET_CONTAINER:
-                r["container_id"] = m["id"]
-            elif m["target"] == TARGET_AREA:
-                r["area_id"] = m["id"]
-            elif m["target"] == TARGET_PLANT:
-                r["plant_id"] = m["id"]
+            if m.get("container_id"):
+                r["container_id"] = m["container_id"]
+            elif m.get("area_id"):
+                r["area_id"] = m["area_id"]
+            else:
+                continue
             readings.append(r)
         if not readings:
             return
         try:
             result = await client.async_push(readings)
-            _LOGGER.debug("VerdiGrow push: %s", result)
+            _LOGGER.debug("VerdiGrow push: %s reading(s): %s", len(readings), result)
         except VerdiGrowError as e:
             _LOGGER.warning("VerdiGrow push failed: %s", e)
 
