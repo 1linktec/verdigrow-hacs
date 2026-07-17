@@ -33,8 +33,10 @@ class VerdiGrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title="VerdiGrow", data=user_input)
         schema = vol.Schema({
-            vol.Required(CONF_URL, default="https://verdigrow.thehopes.ca"): str,
-            vol.Required(CONF_TOKEN): str,
+            vol.Required(CONF_URL): selector.TextSelector(
+                selector.TextSelectorConfig(type="url")),
+            vol.Required(CONF_TOKEN): selector.TextSelector(
+                selector.TextSelectorConfig(type="password")),
         })
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 

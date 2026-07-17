@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to VerdiGrow",
-        "description": "Enter your VerdiGrow URL and API token (Garden Setup shows the token / set API_TOKEN).",
+        "description": "Enter your VerdiGrow URL (e.g. https://your-verdigrow-host) and the API token from VerdiGrow \u2192 Garden Setup \u2192 API access.",
         "data": {
           "url": "VerdiGrow URL",
           "token": "API token"
