@@ -86,10 +86,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if target == TARGET_CONTAINER:
                 readings.append({**base, "container_id": m["id"]})
             elif target == TARGET_AREA:
-                # Fan out to every container in the area that has no dedicated
-                # sensor for this metric.
+                # Fan out to every container in the area, except ones with their
+                # own dedicated sensor for this metric (auto) or ones the user
+                # manually excluded from this ambient sensor.
+                exclude = set(m.get("exclude") or [])
                 for cid in area_containers.get(m["id"], []):
-                    if (cid, m["metric"]) in dedicated:
+                    if (cid, m["metric"]) in dedicated or cid in exclude:
                         continue
                     readings.append({**base, "container_id": cid})
             # plants are not mapping targets

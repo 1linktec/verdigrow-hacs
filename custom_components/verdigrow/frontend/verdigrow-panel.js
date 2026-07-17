@@ -35,8 +35,12 @@ class VerdiGrowPanel extends HTMLElement {
       if (catalog.error) throw new Error(catalog.error);
       this._catalog = catalog;
       this._links = {}; // "target|id|metric" -> entity_id
+      this._excludes = {}; // "areaId|metric" -> Set(container ids) manually excluded from ambient
       (maps.links || []).forEach((l) => {
         this._links[`${l.target}|${l.id}|${l.metric}`] = l.entity_id;
+        if (l.target === "area" && Array.isArray(l.exclude)) {
+          this._excludes[`${l.id}|${l.metric}`] = new Set(l.exclude);
+        }
       });
       this._buildHaIndex();
       this._render();
@@ -93,6 +97,37 @@ class VerdiGrowPanel extends HTMLElement {
     }).join("");
   }
 
+  // Ambient metric rows for an area: the sensor picker plus a per-container
+  // include/exclude list. A container with its own dedicated sensor for the
+  // metric is auto-excluded (disabled); others default to included but can be
+  // unchecked to exclude them from this ambient sensor.
+  _areaMetricRows(area, containers) {
+    return (this._catalog.metric_types || []).map((m) => {
+      const current = this._links[`area|${area.id}|${m.key}`] || "";
+      const exSet = this._excludes[`${area.id}|${m.key}`] || new Set();
+      const cbs = containers.map((ct) => {
+        const hasDedicated = !!this._links[`container|${ct.id}|${m.key}`];
+        const excluded = hasDedicated || exSet.has(ct.id);
+        return `<label class="vg-cb">
+          <input type="checkbox" class="vg-excl" data-area="${area.id}"
+                 data-metric="${esc(m.key)}" data-container="${ct.id}"
+                 ${excluded ? "" : "checked"} ${hasDedicated ? "disabled" : ""}>
+          ${esc(ct.label)}${hasDedicated ? ` <span class="vg-dim">(has own ${esc(m.name)} sensor)</span>` : ""}
+        </label>`;
+      }).join("");
+      const exclUI = containers.length
+        ? `<details class="vg-excl-wrap"><summary class="vg-dim">applies to ${containers.length} container(s) — choose which</summary>
+             <div class="vg-cbs">${cbs}</div></details>`
+        : `<span class="vg-dim">no containers in this area yet</span>`;
+      return `<div class="vg-row vg-arow">
+        <span class="vg-metric">${esc(m.name)} <em>(${esc(m.unit)})</em></span>
+        <select class="vg-pick" data-target="area" data-id="${area.id}"
+                data-metric="${esc(m.key)}" data-current="${esc(current)}"></select>
+        ${exclUI}
+      </div>`;
+    }).join("");
+  }
+
   _render() {
     const c = this._catalog;
     const containersByArea = {};
@@ -115,7 +150,7 @@ class VerdiGrowPanel extends HTMLElement {
       <details class="vg-node" open>
         <summary>📍 ${esc(a.name)} <span class="vg-dim">· ambient — applies to every container in this area</span></summary>
         <div class="vg-body">
-          ${this._metricRows("area", a.id)}
+          ${this._areaMetricRows(a, containersByArea[a.id] || [])}
           ${(containersByArea[a.id] || []).map(containerNode).join("")}
         </div>
       </details>`).join("");
@@ -152,6 +187,10 @@ class VerdiGrowPanel extends HTMLElement {
           border:1px solid var(--divider-color,#ccc);background:var(--card-background-color);color:var(--primary-text-color)}
         .vg-status{color:var(--secondary-text-color);font-size:13px}
         .vg-help{color:var(--secondary-text-color);margin:6px 0 14px}
+        .vg-excl-wrap{margin-left:6px}
+        .vg-excl-wrap summary{cursor:pointer;font-size:13px}
+        .vg-cbs{display:flex;flex-direction:column;gap:2px;padding:6px 0 6px 12px}
+        .vg-cb{font-size:13px;display:flex;gap:6px;align-items:center}
       </style>
       <div class="vg-wrap">
         <h1>VerdiGrow — Sensor Mapping</h1>
@@ -214,10 +253,22 @@ class VerdiGrowPanel extends HTMLElement {
   }
 
   _gather() {
-    return this._selects.filter((s) => s.value).map((s) => ({
-      target: s.dataset.target, id: Number(s.dataset.id),
-      metric: s.dataset.metric, entity_id: s.value,
-    }));
+    const links = [];
+    this._selects.filter((s) => s.value).forEach((s) => {
+      const link = {
+        target: s.dataset.target, id: Number(s.dataset.id),
+        metric: s.dataset.metric, entity_id: s.value,
+      };
+      if (s.dataset.target === "area") {
+        // Manual excludes = containers unchecked and not auto-disabled.
+        link.exclude = Array.from(this.querySelectorAll(
+          `.vg-excl[data-area="${s.dataset.id}"][data-metric="${s.dataset.metric}"]`))
+          .filter((cb) => !cb.disabled && !cb.checked)
+          .map((cb) => Number(cb.dataset.container));
+      }
+      links.push(link);
+    });
+    return links;
   }
 
   async _save() {
