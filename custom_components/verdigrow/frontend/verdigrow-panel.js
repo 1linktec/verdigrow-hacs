@@ -289,7 +289,7 @@ class VerdiGrowPanel extends HTMLElement {
       </details>`;
 
     const areaNodes = (c.areas || []).map((a) => `
-      <details class="vg-node" open>
+      <details class="vg-node">
         <summary>📍 ${esc(a.name)} <span class="vg-dim">· ambient — applies to every container in this area</span></summary>
         <div class="vg-body">
           ${this._areaMetricRows(a, containersByArea[a.id] || [])}
@@ -388,43 +388,68 @@ class VerdiGrowPanel extends HTMLElement {
     this._searchEl.value = this._search;
 
     this._selects.forEach((s) => s.addEventListener("change", () => { s.dataset.current = s.value; }));
-    this._filterEl.addEventListener("change", () => { this._filterArea = this._filterEl.value; this._fillSelects(); });
-    this._searchEl.addEventListener("input", () => { this._search = this._searchEl.value; this._fillSelects(); });
+    this._filterEl.addEventListener("change", () => { this._filterArea = this._filterEl.value; this._refill(); });
+    this._searchEl.addEventListener("input", () => { this._search = this._searchEl.value; this._refill(); });
     this.querySelector("#vg-save").addEventListener("click", () => this._save());
     this.querySelector("#vg-pushnow").addEventListener("click", () => this._pushNow());
-    this.querySelector("#vg-expand").addEventListener("click", () =>
-      this.querySelectorAll("details.vg-node").forEach((d) => { d.open = true; }));
+    this.querySelector("#vg-expand").addEventListener("click", () => {
+      this.querySelectorAll("details.vg-node").forEach((d) => { d.open = true; });
+      this._fillVisible();
+    });
     this.querySelector("#vg-collapse").addEventListener("click", () =>
       this.querySelectorAll("details.vg-node").forEach((d) => { d.open = false; }));
+    // Lazy fill: only populate a select's 1800+ options when its row becomes
+    // visible (its <details> opens) — filling all ~685 up front froze the page.
+    this.addEventListener("toggle", (e) => {
+      if (e.target && e.target.open) this._fillVisible();
+    }, true);
     const rf = this.querySelector("#vg-refresh");
     if (rf) rf.addEventListener("click", () => this._refresh());
-    this.querySelectorAll(".vg-card-open").forEach((b) =>
-      b.addEventListener("click", () => this._openCard(b.dataset.card)));
     const imp = this.querySelector("#vg-import-areas");
     if (imp) imp.addEventListener("click", () => this._importAreas());
     const sm = this.querySelector("#vg-save-areamap");
     if (sm) sm.addEventListener("click", () => this._saveAreaMap());
-    this._fillSelects();
+    this._updateStatus();
   }
 
-  _fillSelects() {
-    const list = this._entitiesFor(this._filterArea);
-    this._statusEl.textContent = `${list.length} sensor${list.length === 1 ? "" : "s"}`
-      + (this._filterArea ? " in this HA area" : " (all areas)");
-    this._selects.forEach((sel) => {
-      const current = sel.dataset.current || "";
-      sel.innerHTML = "";
-      const none = new Option("— none —", "");
-      sel.appendChild(none);
-      let hasCurrent = !current;
-      list.forEach((e) => {
-        if (e.entity_id === current) hasCurrent = true;
-        const label = `${e.name} · ${e.entity_id}` + (e.state != null ? ` = ${e.state}${e.unit}` : "");
-        sel.appendChild(new Option(label, e.entity_id));
-      });
-      if (current && !hasCurrent) sel.appendChild(new Option(`${current} (outside filter)`, current));
-      sel.value = current;
+  _updateStatus() {
+    if (!this._statusEl) return;
+    const n = this._entitiesFor(this._filterArea).length;
+    this._statusEl.textContent = `${n} sensor${n === 1 ? "" : "s"}`
+      + (this._filterArea ? " in this HA area" : " (all areas)") + " · expand a row to map";
+  }
+
+  _fillSelect(sel, list) {
+    const current = sel.dataset.current || "";
+    const opts = ['<option value="">— none —</option>'];
+    let hasCurrent = !current;
+    list.forEach((e) => {
+      if (e.entity_id === current) hasCurrent = true;
+      const label = `${e.name} · ${e.entity_id}` + (e.state != null ? ` = ${e.state}${e.unit}` : "");
+      opts.push(`<option value="${e.entity_id}">${label}</option>`);
     });
+    if (current && !hasCurrent) opts.push(`<option value="${current}">${current} (outside filter)</option>`);
+    sel.innerHTML = opts.join("");
+    sel.value = current;
+    sel._filled = true;
+    sel._filledKey = this._filterArea + "|" + this._search;
+  }
+
+  _fillVisible() {
+    const list = this._entitiesFor(this._filterArea);
+    const key = this._filterArea + "|" + this._search;
+    this._updateStatus();
+    for (const sel of this._selects) {
+      if (sel.offsetParent === null) continue;      // hidden (collapsed) — skip
+      if (sel._filled && sel._filledKey === key) continue;
+      this._fillSelect(sel, list);
+    }
+  }
+
+  _refill() {
+    // Filter/search changed — mark everything stale, refill only what's visible.
+    this._selects.forEach((s) => { s._filled = false; });
+    this._fillVisible();
   }
 
   _gather() {
