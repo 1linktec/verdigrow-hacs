@@ -61,6 +61,7 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
         self._options = dict(entry.options)
         self._options.setdefault(CONF_MAPPINGS, [])
         self._options.setdefault(CONF_AREA_LINKS, [])
+        self._map_area_id = None  # HA area chosen as the filter in add_mapping step 1
 
     def _client(self):
         return VerdiGrowClient(self.hass, self.entry.data[CONF_URL], self.entry.data[CONF_TOKEN],
@@ -136,19 +137,37 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="map_area", data_schema=schema)
 
     async def async_step_add_mapping(self, user_input=None):
+        """Step 1: pick which linked HA area to work in. This is the FILTER —
+        it narrows the sensor list (step 2) to entities in that HA area."""
         links = self._options.get(CONF_AREA_LINKS, [])
         if not links:
             return self.async_abort(reason="map_area_first")
-        area_ids = [l["ha_area_id"] for l in links]
-        entities = self._entities_in_areas(area_ids)
+        area_opts = [{"value": l["ha_area_id"], "label": l["ha_area_name"]} for l in links]
+        if user_input is not None:
+            self._map_area_id = user_input["ha_area"]
+            return await self.async_step_map_entity()
+        schema = vol.Schema({
+            vol.Required("ha_area"): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=area_opts, mode="dropdown")),
+        })
+        return self.async_show_form(step_id="add_mapping", data_schema=schema)
+
+    async def async_step_map_entity(self, user_input=None):
+        """Step 2: within the chosen HA area, pick a real HA sensor entity, the
+        VerdiGrow target(s) it feeds (areas/containers/plants in that area), and
+        the metric."""
+        area_id = self._map_area_id
+        link = next((l for l in self._options[CONF_AREA_LINKS]
+                     if l["ha_area_id"] == area_id), None)
+        entities = self._entities_in_areas({area_id})
         if not entities:
             return self.async_abort(reason="no_entities_in_areas")
-        # Targets offered, scoped to the linked HA areas:
-        #   • the VG areas/containers the user explicitly linked
+        entity_ids = [e["value"] for e in entities]
+
+        # Targets scoped to THIS HA area's links:
+        #   • the VG areas/containers linked to this HA area
         #   • every container currently in one of those linked VG areas
         #   • every active plant currently in one of those linked VG areas
-        # so a sensor in "East Side" can push to the Garden Wall area, a specific
-        # bed, or an individual tomato — all without listing the whole garden.
         seen, target_opts = set(), []
 
         def _add(value, label):
@@ -156,11 +175,10 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
                 seen.add(value); target_opts.append({"value": value, "label": label})
 
         linked_vg_area_ids = set()
-        for l in links:
-            for t in l["targets"]:
-                _add(t["value"], t["label"])
-                if t["value"].startswith(f"{TARGET_AREA}:"):
-                    linked_vg_area_ids.add(int(t["value"].split(":", 1)[1]))
+        for t in (link["targets"] if link else []):
+            _add(t["value"], t["label"])
+            if t["value"].startswith(f"{TARGET_AREA}:"):
+                linked_vg_area_ids.add(int(t["value"].split(":", 1)[1]))
         try:
             containers = await self._client().async_containers()
             plants = await self._client().async_plants()
@@ -185,15 +203,16 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=self._options)
 
         schema = vol.Schema({
-            vol.Required("entity_id"): selector.SelectSelector(
-                selector.SelectSelectorConfig(options=entities, mode="dropdown")),
-            vol.Required("targets"):
-                selector.SelectSelector(selector.SelectSelectorConfig(
-                    options=target_opts, multiple=True, mode="dropdown")),
+            vol.Required("entity_id"): selector.EntitySelector(
+                selector.EntitySelectorConfig(include_entities=entity_ids)),
+            vol.Required("targets"): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=target_opts, multiple=True, mode="dropdown")),
             vol.Required("metric"): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=metric_opts, mode="dropdown")),
         })
-        return self.async_show_form(step_id="add_mapping", data_schema=schema)
+        return self.async_show_form(
+            step_id="map_entity", data_schema=schema,
+            description_placeholders={"area": link["ha_area_name"] if link else area_id})
 
     async def async_step_remove_mapping(self, user_input=None):
         maps = self._options.get(CONF_MAPPINGS, [])
