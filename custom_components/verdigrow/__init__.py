@@ -158,6 +158,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         frontend_dir = str(Path(__file__).parent / "frontend")
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, frontend_dir, False)])
+        # Load the custom Lovelace card so `custom:verdigrow-container-card` works.
+        from homeassistant.components.frontend import add_extra_js_url
+        add_extra_js_url(hass, f"{STATIC_URL}/verdigrow-card.js")
         await panel_custom.async_register_panel(
             hass,
             frontend_url_path=PANEL_URL,
