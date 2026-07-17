@@ -10,6 +10,7 @@ CONF_TOKEN = "token"
 CONF_INTERVAL = "update_interval"      # seconds between pushes
 DEFAULT_INTERVAL = 3600                # once per hour (don't flood the DB)
 CONF_MAPPINGS = "mappings"             # list of {entity_id, target, id, metric}
+CONF_AREA_LINKS = "area_links"         # list of {ha_area_id, ha_area_name, targets[]}
 
 # Mapping target kinds
 TARGET_CONTAINER = "container"
