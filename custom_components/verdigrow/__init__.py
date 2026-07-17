@@ -26,7 +26,7 @@ from .api import VerdiGrowClient, VerdiGrowError
 from .const import (CONF_INTERVAL, CONF_TOKEN, CONF_URL, CONF_VERIFY_SSL,
                     DEFAULT_INTERVAL, DOMAIN, PANEL_ICON, PANEL_TITLE, PANEL_URL,
                     STATIC_URL, STORAGE_KEY, STORAGE_VERSION,
-                    TARGET_AREA, TARGET_CONTAINER, TARGET_PLANT)
+                    TARGET_AREA, TARGET_CONTAINER)
 from .http_api import (VerdiGrowCatalogView, VerdiGrowMappingsView,
                        VerdiGrowPushView)
 
@@ -47,28 +47,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         links = data.get("links", [])
         if not links:
             return 0
+
+        def _value(entity_id):
+            st = hass.states.get(entity_id or "")
+            if st is None or st.state in _UNAVAILABLE:
+                return None
+            try:
+                return float(st.state)
+            except (TypeError, ValueError):
+                return None
+
+        # Which (container, metric) pairs have a DEDICATED sensor. Ambient
+        # (area) sensors are skipped for those pairs — a container's own sensor
+        # for a metric wins over the area's ambient sensor for that same metric.
+        dedicated = {(l["id"], l["metric"]) for l in links
+                     if l.get("target") == TARGET_CONTAINER}
+
+        # Area -> its current container ids, for ambient fan-out (done here in HA
+        # so the dedicated-overrides-ambient rule can be applied per metric).
+        area_containers = {}
+        if any(l.get("target") == TARGET_AREA for l in links):
+            try:
+                for c in await client.async_containers():
+                    if c.get("area_id"):
+                        area_containers.setdefault(c["area_id"], []).append(c["id"])
+            except VerdiGrowError as e:
+                _LOGGER.warning("VerdiGrow: could not fetch containers for ambient fan-out: %s", e)
+
+        now = dt_util.utcnow().isoformat()
         readings = []
         for m in links:
-            state = hass.states.get(m.get("entity_id", ""))
-            if state is None or state.state in _UNAVAILABLE:
+            value = _value(m.get("entity_id"))
+            if value is None:
                 continue
-            try:
-                value = float(state.state)
-            except (TypeError, ValueError):
-                continue
-            r = {"metric": m["metric"], "value": value,
-                 "occurred_at": dt_util.utcnow().isoformat(),
-                 "entity_id": m["entity_id"]}
+            base = {"metric": m["metric"], "value": value,
+                    "occurred_at": now, "entity_id": m["entity_id"]}
             target = m.get("target")
             if target == TARGET_CONTAINER:
-                r["container_id"] = m["id"]
+                readings.append({**base, "container_id": m["id"]})
             elif target == TARGET_AREA:
-                r["area_id"] = m["id"]
-            elif target == TARGET_PLANT:
-                r["plant_id"] = m["id"]
-            else:
-                continue
-            readings.append(r)
+                # Fan out to every container in the area that has no dedicated
+                # sensor for this metric.
+                for cid in area_containers.get(m["id"], []):
+                    if (cid, m["metric"]) in dedicated:
+                        continue
+                    readings.append({**base, "container_id": cid})
+            # plants are not mapping targets
         if not readings:
             return 0
         try:
