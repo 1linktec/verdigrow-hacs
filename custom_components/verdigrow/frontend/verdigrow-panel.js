@@ -112,8 +112,8 @@ class VerdiGrowPanel extends HTMLElement {
       </details>`;
 
     const areaNodes = (c.areas || []).map((a) => `
-      <details class="vg-node">
-        <summary>📍 ${esc(a.name)} <span class="vg-dim">· area (ambient)</span></summary>
+      <details class="vg-node" open>
+        <summary>📍 ${esc(a.name)} <span class="vg-dim">· ambient — applies to every container in this area</span></summary>
         <div class="vg-body">
           ${this._metricRows("area", a.id)}
           ${(containersByArea[a.id] || []).map(containerNode).join("")}
@@ -124,18 +124,6 @@ class VerdiGrowPanel extends HTMLElement {
       <details class="vg-node">
         <summary>🪣 Containers with no area</summary>
         <div class="vg-body">${unassigned.map(containerNode).join("")}</div>
-      </details>` : "";
-
-    const plantNodes = (c.plants || []).length ? `
-      <details class="vg-node">
-        <summary>🌱 Plants <span class="vg-dim">· maps to the plant's current container</span></summary>
-        <div class="vg-body">
-          ${(c.plants || []).map((p) => `
-            <details class="vg-node">
-              <summary>${esc(p.label)} <span class="vg-dim">${p.area ? "· " + esc(p.area) : ""}</span></summary>
-              <div class="vg-body">${this._metricRows("plant", p.id)}</div>
-            </details>`).join("")}
-        </div>
       </details>` : "";
 
     const areaOptions = Object.values(this._haAreas)
@@ -167,19 +155,23 @@ class VerdiGrowPanel extends HTMLElement {
       </style>
       <div class="vg-wrap">
         <h1>VerdiGrow — Sensor Mapping</h1>
-        <p class="vg-help">Filter by HA area to cut the sensor list, expand an area/container/plant,
-          and pick a sensor for each metric. A sensor on a container is <em>dedicated</em>; on an
-          area it's <em>ambient</em>. Stored in Home Assistant; readings are pushed to VerdiGrow.</p>
+        <p class="vg-help">Filter by HA area to cut the sensor list, expand a container (or an
+          area), and pick a sensor for each metric. A sensor on a <strong>container</strong>
+          (bed, row, pot, bucket, tray) is <em>dedicated</em>. A sensor on an <strong>area</strong>
+          is <em>ambient</em> — the area stores nothing; the reading is recorded on every container
+          currently in that area. Stored in Home Assistant; readings are pushed to VerdiGrow.</p>
         <div class="vg-bar">
           <label>HA area</label>
           <select id="vg-filter"><option value="">All HA areas</option>${areaOptions}</select>
           <input id="vg-search" placeholder="filter sensors…">
+          <button class="vg-btn secondary" id="vg-expand" type="button">Expand all</button>
+          <button class="vg-btn secondary" id="vg-collapse" type="button">Collapse all</button>
           <span id="vg-status" class="vg-status"></span>
           <span style="flex:1"></span>
           <button class="vg-btn secondary" id="vg-pushnow" type="button">Push now</button>
           <button class="vg-btn" id="vg-save" type="button">Save mapping</button>
         </div>
-        ${areaNodes}${unassignedNode}${plantNodes}
+        ${areaNodes}${unassignedNode}
       </div>`;
 
     this._filterEl = this.querySelector("#vg-filter");
@@ -194,11 +186,17 @@ class VerdiGrowPanel extends HTMLElement {
     this._searchEl.addEventListener("input", () => { this._search = this._searchEl.value; this._fillSelects(); });
     this.querySelector("#vg-save").addEventListener("click", () => this._save());
     this.querySelector("#vg-pushnow").addEventListener("click", () => this._pushNow());
+    this.querySelector("#vg-expand").addEventListener("click", () =>
+      this.querySelectorAll("details.vg-node").forEach((d) => { d.open = true; }));
+    this.querySelector("#vg-collapse").addEventListener("click", () =>
+      this.querySelectorAll("details.vg-node").forEach((d) => { d.open = false; }));
     this._fillSelects();
   }
 
   _fillSelects() {
     const list = this._entitiesFor(this._filterArea);
+    this._statusEl.textContent = `${list.length} sensor${list.length === 1 ? "" : "s"}`
+      + (this._filterArea ? " in this HA area" : " (all areas)");
     this._selects.forEach((sel) => {
       const current = sel.dataset.current || "";
       sel.innerHTML = "";
