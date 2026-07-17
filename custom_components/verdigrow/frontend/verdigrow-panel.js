@@ -287,11 +287,17 @@ class VerdiGrowPanel extends HTMLElement {
     this._plantByContainer = plantByContainer;
     this._unassigned = unassigned;
 
-    const areaNodes = (c.areas || []).map((a) => `
+    // Only show areas that actually hold containers — an ambient sensor only
+    // fans out to containers, so empty areas (imported HA rooms) are just noise.
+    const shownAreas = (c.areas || []).filter((a) => (containersByArea[a.id] || []).length);
+    const hiddenAreas = (c.areas || []).length - shownAreas.length;
+    const areaNodes = shownAreas.map((a) => `
       <details class="vg-node" data-node="a:${a.id}">
         <summary>📍 ${esc(a.name)} <span class="vg-dim">· ambient — applies to every container in this area</span></summary>
         <div class="vg-body" data-lazy="1"></div>
       </details>`).join("");
+    const hiddenNote = hiddenAreas
+      ? `<p class="vg-dim" style="font-size:12px">${hiddenAreas} area(s) with no containers hidden.</p>` : "";
 
     const unassignedNode = unassigned.length ? `
       <details class="vg-node" data-node="u">
@@ -373,7 +379,7 @@ class VerdiGrowPanel extends HTMLElement {
           <button class="vg-btn secondary" id="vg-pushnow" type="button">Push now</button>
           <button class="vg-btn" id="vg-save" type="button">Save mapping</button>
         </div>
-        ${areaNodes}${unassignedNode}
+        ${areaNodes}${unassignedNode}${hiddenNote}
       </div>`;
 
     this._filterEl = this.querySelector("#vg-filter");
