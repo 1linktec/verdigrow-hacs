@@ -5,6 +5,7 @@ DOMAIN = "verdigrow"
 # Config entry data
 CONF_URL = "url"
 CONF_TOKEN = "token"
+CONF_VERIFY_SSL = "verify_ssl"
 
 # Options
 CONF_INTERVAL = "update_interval"      # seconds between pushes

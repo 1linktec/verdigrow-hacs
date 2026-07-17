@@ -6,7 +6,8 @@
         "description": "Enter your VerdiGrow URL (e.g. https://your-verdigrow-host) and the API token from VerdiGrow \u2192 Garden Setup \u2192 API access.",
         "data": {
           "url": "VerdiGrow URL",
-          "token": "API token"
+          "token": "API token",
+          "verify_ssl": "Verify SSL certificate (uncheck for self-signed / untrusted proxy certs)"
         }
       }
     },

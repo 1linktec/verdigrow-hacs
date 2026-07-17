@@ -19,7 +19,8 @@ from homeassistant.util import dt as dt_util
 
 from .api import VerdiGrowClient, VerdiGrowError
 from .const import (CONF_INTERVAL, CONF_MAPPINGS, CONF_TOKEN, CONF_URL,
-                    DEFAULT_INTERVAL, DOMAIN, TARGET_AREA, TARGET_CONTAINER)
+                    CONF_VERIFY_SSL, DEFAULT_INTERVAL, DOMAIN, TARGET_AREA,
+                    TARGET_CONTAINER)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ _UNAVAILABLE = ("unknown", "unavailable", "", None)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    client = VerdiGrowClient(hass, entry.data[CONF_URL], entry.data[CONF_TOKEN])
+    client = VerdiGrowClient(hass, entry.data[CONF_URL], entry.data[CONF_TOKEN],
+                             entry.data.get(CONF_VERIFY_SSL, True))
     hass.data.setdefault(DOMAIN, {})
 
     async def _push(_now=None):

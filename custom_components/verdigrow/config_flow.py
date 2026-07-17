@@ -13,8 +13,8 @@ from homeassistant.helpers import (area_registry as ar, device_registry as dr,
 
 from .api import VerdiGrowClient, VerdiGrowError
 from .const import (CONF_AREA_LINKS, CONF_INTERVAL, CONF_MAPPINGS, CONF_TOKEN,
-                    CONF_URL, DEFAULT_INTERVAL, DOMAIN, TARGET_AREA,
-                    TARGET_CONTAINER)
+                    CONF_URL, CONF_VERIFY_SSL, DEFAULT_INTERVAL, DOMAIN,
+                    TARGET_AREA, TARGET_CONTAINER)
 
 _LOGGER = logging.getLogger(__name__)
 _SENSOR_DOMAINS = ("sensor.", "binary_sensor.", "number.")
@@ -26,7 +26,8 @@ class VerdiGrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         errors = {}
         if user_input is not None:
-            client = VerdiGrowClient(self.hass, user_input[CONF_URL], user_input[CONF_TOKEN])
+            client = VerdiGrowClient(self.hass, user_input[CONF_URL], user_input[CONF_TOKEN],
+                                     user_input.get(CONF_VERIFY_SSL, True))
             try:
                 await client.async_ping()
             except VerdiGrowError as e:
@@ -39,6 +40,7 @@ class VerdiGrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema({
             vol.Required(CONF_URL): str,
             vol.Required(CONF_TOKEN): str,
+            vol.Required(CONF_VERIFY_SSL, default=True): bool,
         })
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
@@ -56,7 +58,8 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
         self._options.setdefault(CONF_AREA_LINKS, [])
 
     def _client(self):
-        return VerdiGrowClient(self.hass, self.entry.data[CONF_URL], self.entry.data[CONF_TOKEN])
+        return VerdiGrowClient(self.hass, self.entry.data[CONF_URL], self.entry.data[CONF_TOKEN],
+                               self.entry.data.get(CONF_VERIFY_SSL, True))
 
     async def _vg_target_options(self):
         """All VerdiGrow containers+areas as [{value,label}] (from the read API)."""

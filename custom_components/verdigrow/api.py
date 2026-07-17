@@ -19,8 +19,11 @@ class VerdiGrowError(Exception):
 
 
 class VerdiGrowClient:
-    def __init__(self, hass: HomeAssistant, url: str, token: str) -> None:
-        self._session = async_get_clientsession(hass)
+    def __init__(self, hass: HomeAssistant, url: str, token: str,
+                 verify_ssl: bool = True) -> None:
+        # verify_ssl=False → a session that skips cert verification (self-signed
+        # / internal-CA proxies that HA doesn't trust).
+        self._session = async_get_clientsession(hass, verify_ssl=verify_ssl)
         self._url = url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {token}"}
 
