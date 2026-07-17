@@ -25,24 +25,29 @@ class VerdiGrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         errors = {}
+        detail = ""
+        data = user_input or {}
         if user_input is not None:
             client = VerdiGrowClient(self.hass, user_input[CONF_URL], user_input[CONF_TOKEN],
                                      user_input.get(CONF_VERIFY_SSL, True))
             try:
                 await client.async_ping()
             except VerdiGrowError as e:
-                _LOGGER.warning("VerdiGrow connect failed: %s", e)
-                errors["base"] = "invalid_auth" if "unauthorized" in str(e) else "cannot_connect"
+                detail = str(e)
+                _LOGGER.warning("VerdiGrow connect failed: %s", detail)
+                errors["base"] = "invalid_auth" if "unauthorized" in detail else "cannot_connect"
             else:
                 await self.async_set_unique_id(user_input[CONF_URL])
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title="VerdiGrow", data=user_input)
+        # Re-show with the values already entered so nothing has to be re-typed.
         schema = vol.Schema({
-            vol.Required(CONF_URL): str,
-            vol.Required(CONF_TOKEN): str,
-            vol.Required(CONF_VERIFY_SSL, default=True): bool,
+            vol.Required(CONF_URL, default=data.get(CONF_URL, "")): str,
+            vol.Required(CONF_TOKEN, default=data.get(CONF_TOKEN, "")): str,
+            vol.Required(CONF_VERIFY_SSL, default=data.get(CONF_VERIFY_SSL, True)): bool,
         })
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="user", data_schema=schema, errors=errors,
+                                    description_placeholders={"detail": detail})
 
     @staticmethod
     @callback
