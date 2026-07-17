@@ -1,53 +1,55 @@
 """
 VerdiGrow — Home Assistant integration.
 
-Push model: HA is the sensor hub. The sensor→metric map is authored in
-VerdiGrow's console (Sensor Mapping). This integration PULLS that map, reads the
-mapped HA entity states, and PUSHES readings to VerdiGrow's ingest API on a
-configurable interval (default 1 hour). VerdiGrow never pulls readings from HA.
-No hardware access; no dashboards rendered here.
+HA is the sensor hub and the home of all HA management. This integration ships a
+custom sidebar **panel** (the tree/filter sensor-mapping UI), stores that map in
+HA, and PUSHES readings to VerdiGrow's ingest API on a configurable interval
+(default 1 hour). VerdiGrow only stores readings and serves a read-only catalog —
+it is not an extension of HA. No hardware access; no dashboards rendered here.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from pathlib import Path
 
+from homeassistant.components import panel_custom
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .api import VerdiGrowClient, VerdiGrowError
 from .const import (CONF_INTERVAL, CONF_TOKEN, CONF_URL, CONF_VERIFY_SSL,
-                    DEFAULT_INTERVAL, DOMAIN)
+                    DEFAULT_INTERVAL, DOMAIN, PANEL_ICON, PANEL_TITLE, PANEL_URL,
+                    STATIC_URL, STORAGE_KEY, STORAGE_VERSION,
+                    TARGET_AREA, TARGET_CONTAINER, TARGET_PLANT)
+from .http_api import (VerdiGrowCatalogView, VerdiGrowMappingsView,
+                       VerdiGrowPushView)
 
 _LOGGER = logging.getLogger(__name__)
 
-# No HA entities created by this integration (push-only). Dashboards/cards are a
-# later phase.
 PLATFORMS: list[str] = []
-
 _UNAVAILABLE = ("unknown", "unavailable", "", None)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = VerdiGrowClient(hass, entry.data[CONF_URL], entry.data[CONF_TOKEN],
                              entry.data.get(CONF_VERIFY_SSL, True))
+    store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
     hass.data.setdefault(DOMAIN, {})
 
-    async def _push(_now=None):
-        # Pull the sensor map authored in VerdiGrow's console.
-        try:
-            links = await client.async_sensor_links()
-        except VerdiGrowError as e:
-            _LOGGER.warning("VerdiGrow: could not fetch sensor map: %s", e)
-            return
+    async def _push(_now=None) -> int:
+        data = await store.async_load() or {}
+        links = data.get("links", [])
         if not links:
-            return
+            return 0
         readings = []
         for m in links:
-            state = hass.states.get(m["entity_id"])
+            state = hass.states.get(m.get("entity_id", ""))
             if state is None or state.state in _UNAVAILABLE:
                 continue
             try:
@@ -57,36 +59,62 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             r = {"metric": m["metric"], "value": value,
                  "occurred_at": dt_util.utcnow().isoformat(),
                  "entity_id": m["entity_id"]}
-            if m.get("container_id"):
-                r["container_id"] = m["container_id"]
-            elif m.get("area_id"):
-                r["area_id"] = m["area_id"]
+            target = m.get("target")
+            if target == TARGET_CONTAINER:
+                r["container_id"] = m["id"]
+            elif target == TARGET_AREA:
+                r["area_id"] = m["id"]
+            elif target == TARGET_PLANT:
+                r["plant_id"] = m["id"]
             else:
                 continue
             readings.append(r)
         if not readings:
-            return
+            return 0
         try:
             result = await client.async_push(readings)
-            _LOGGER.debug("VerdiGrow push: %s reading(s): %s", len(readings), result)
+            _LOGGER.debug("VerdiGrow pushed %s reading(s): %s", len(readings), result)
+            return len(readings)
         except VerdiGrowError as e:
             _LOGGER.warning("VerdiGrow push failed: %s", e)
+            return 0
+
+    hass.data[DOMAIN]["runtime"] = {"client": client, "store": store, "push": _push}
+
+    # Register the local HTTP endpoints the panel calls (once).
+    if not hass.data[DOMAIN].get("_views"):
+        hass.http.register_view(VerdiGrowCatalogView(hass))
+        hass.http.register_view(VerdiGrowMappingsView(hass))
+        hass.http.register_view(VerdiGrowPushView(hass))
+        hass.data[DOMAIN]["_views"] = True
+
+    # Register the custom sidebar panel (once).
+    if not hass.data[DOMAIN].get("_panel"):
+        frontend_dir = str(Path(__file__).parent / "frontend")
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(STATIC_URL, frontend_dir, False)])
+        await panel_custom.async_register_panel(
+            hass,
+            frontend_url_path=PANEL_URL,
+            webcomponent_name="verdigrow-panel",
+            module_url=f"{STATIC_URL}/verdigrow-panel.js",
+            sidebar_title=PANEL_TITLE,
+            sidebar_icon=PANEL_ICON,
+            require_admin=False,
+            embed_iframe=False,
+        )
+        hass.data[DOMAIN]["_panel"] = True
 
     interval = int(entry.options.get(CONF_INTERVAL, DEFAULT_INTERVAL))
     unsub = async_track_time_interval(hass, _push, timedelta(seconds=interval))
-    hass.data[DOMAIN][entry.entry_id] = {"client": client, "unsub": unsub, "push": _push}
+    hass.data[DOMAIN][entry.entry_id] = {"unsub": unsub}
 
-    # Push once shortly after setup so data appears without waiting a full interval.
     entry.async_on_unload(entry.add_update_listener(_reload_on_options))
     hass.async_create_task(_push())
-
-    if PLATFORMS:
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def _reload_on_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Re-apply interval/mappings when options change."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -94,6 +122,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if data and data.get("unsub"):
         data["unsub"]()
-    if PLATFORMS:
-        return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    # If this was the last entry, tear down the shared panel + runtime.
+    remaining = [k for k in hass.data.get(DOMAIN, {})
+                 if k not in ("_views", "_panel", "runtime")]
+    if not remaining:
+        hass.data.get(DOMAIN, {}).pop("runtime", None)
+        if hass.data.get(DOMAIN, {}).pop("_panel", False):
+            from homeassistant.components import frontend
+            frontend.async_remove_panel(hass, PANEL_URL)
     return True

@@ -23,7 +23,7 @@
     "step": {
       "init": {
         "title": "VerdiGrow — update frequency",
-        "description": "Map your HA sensors to VerdiGrow metrics in VerdiGrow's console (Sensor Mapping). This integration pulls that map and pushes readings on the interval below. Default is once an hour — don't set it too low or you'll flood the database.",
+        "description": "Map your HA sensors to VerdiGrow metrics in the VerdiGrow panel (in the HA sidebar). This integration pushes those readings on the interval below. Default is once an hour — don't set it too low or you'll flood the database.",
         "data": {
           "update_interval": "Seconds between pushes"
         }
