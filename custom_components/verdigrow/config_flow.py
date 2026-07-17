@@ -14,7 +14,7 @@ from homeassistant.helpers import (area_registry as ar, device_registry as dr,
 from .api import VerdiGrowClient, VerdiGrowError
 from .const import (CONF_AREA_LINKS, CONF_INTERVAL, CONF_MAPPINGS, CONF_TOKEN,
                     CONF_URL, CONF_VERIFY_SSL, DEFAULT_INTERVAL, DOMAIN,
-                    TARGET_AREA, TARGET_CONTAINER)
+                    TARGET_AREA, TARGET_CONTAINER, TARGET_PLANT)
 
 _LOGGER = logging.getLogger(__name__)
 _SENSOR_DOMAINS = ("sensor.", "binary_sensor.", "number.")
@@ -143,16 +143,36 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
         entities = self._entities_in_areas(area_ids)
         if not entities:
             return self.async_abort(reason="no_entities_in_areas")
-        # Targets offered = the VG targets linked to those HA areas (tight list).
+        # Targets offered, scoped to the linked HA areas:
+        #   • the VG areas/containers the user explicitly linked
+        #   • every container currently in one of those linked VG areas
+        #   • every active plant currently in one of those linked VG areas
+        # so a sensor in "East Side" can push to the Garden Wall area, a specific
+        # bed, or an individual tomato — all without listing the whole garden.
         seen, target_opts = set(), []
+
+        def _add(value, label):
+            if value not in seen:
+                seen.add(value); target_opts.append({"value": value, "label": label})
+
+        linked_vg_area_ids = set()
         for l in links:
             for t in l["targets"]:
-                if t["value"] not in seen:
-                    seen.add(t["value"]); target_opts.append(t)
+                _add(t["value"], t["label"])
+                if t["value"].startswith(f"{TARGET_AREA}:"):
+                    linked_vg_area_ids.add(int(t["value"].split(":", 1)[1]))
         try:
+            containers = await self._client().async_containers()
+            plants = await self._client().async_plants()
             metrics = await self._client().async_metric_types()
         except VerdiGrowError:
             return self.async_abort(reason="cannot_connect")
+        for c in containers:
+            if c.get("area_id") in linked_vg_area_ids:
+                _add(f"{TARGET_CONTAINER}:{c['id']}", f"Container: {c['label']}")
+        for p in plants:
+            if p.get("area_id") in linked_vg_area_ids:
+                _add(f"{TARGET_PLANT}:{p['id']}", f"Plant: {p['label']}")
         metric_opts = [{"value": m["key"], "label": f"{m['name']} ({m['unit']})"} for m in metrics]
 
         if user_input is not None:
@@ -167,7 +187,7 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
         schema = vol.Schema({
             vol.Required("entity_id"): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=entities, mode="dropdown")),
-            vol.Required("targets", default=[t["value"] for t in target_opts]):
+            vol.Required("targets"):
                 selector.SelectSelector(selector.SelectSelectorConfig(
                     options=target_opts, multiple=True, mode="dropdown")),
             vol.Required("metric"): selector.SelectSelector(

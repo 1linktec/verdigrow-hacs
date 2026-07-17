@@ -20,7 +20,7 @@ from homeassistant.util import dt as dt_util
 from .api import VerdiGrowClient, VerdiGrowError
 from .const import (CONF_INTERVAL, CONF_MAPPINGS, CONF_TOKEN, CONF_URL,
                     CONF_VERIFY_SSL, DEFAULT_INTERVAL, DOMAIN, TARGET_AREA,
-                    TARGET_CONTAINER)
+                    TARGET_CONTAINER, TARGET_PLANT)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +56,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 r["container_id"] = m["id"]
             elif m["target"] == TARGET_AREA:
                 r["area_id"] = m["id"]
+            elif m["target"] == TARGET_PLANT:
+                r["plant_id"] = m["id"]
             readings.append(r)
         if not readings:
             return

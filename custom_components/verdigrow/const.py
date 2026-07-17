@@ -16,10 +16,12 @@ CONF_AREA_LINKS = "area_links"         # list of {ha_area_id, ha_area_name, targ
 # Mapping target kinds
 TARGET_CONTAINER = "container"
 TARGET_AREA = "area"
+TARGET_PLANT = "plant"
 
 # VerdiGrow API paths (token-authenticated, Bearer)
 API_PING = "/api/ping/"
 API_CONTAINERS = "/api/containers/"
+API_PLANTS = "/api/plants/"
 API_AREAS = "/api/areas/"
 API_METRIC_TYPES = "/api/metric-types/"
 API_READINGS = "/api/readings/"

@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (API_AREAS, API_CONTAINERS, API_METRIC_TYPES, API_PING,
-                    API_READINGS)
+                    API_PLANTS, API_READINGS)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +46,9 @@ class VerdiGrowClient:
 
     async def async_containers(self) -> list[dict]:
         return (await self._get(API_CONTAINERS)).get("containers", [])
+
+    async def async_plants(self) -> list[dict]:
+        return (await self._get(API_PLANTS)).get("plants", [])
 
     async def async_areas(self) -> list[dict]:
         return (await self._get(API_AREAS)).get("areas", [])
