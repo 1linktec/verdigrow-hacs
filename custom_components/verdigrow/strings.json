@@ -4,7 +4,10 @@
       "user": {
         "title": "Connect to VerdiGrow",
         "description": "Enter your VerdiGrow URL and API token (Garden Setup shows the token / set API_TOKEN).",
-        "data": { "url": "VerdiGrow URL", "token": "API token" }
+        "data": {
+          "url": "VerdiGrow URL",
+          "token": "API token"
+        }
       }
     },
     "error": {
@@ -27,16 +30,24 @@
       },
       "interval": {
         "title": "Update frequency",
-        "data": { "update_interval": "Seconds between pushes" }
+        "data": {
+          "update_interval": "Seconds between pushes"
+        }
       },
       "add_mapping": {
         "title": "Map an HA sensor to VerdiGrow",
-        "description": "Pick an HA sensor, the VerdiGrow container or area it measures, and which metric it is.",
-        "data": { "entity_id": "HA sensor", "target": "VerdiGrow target", "metric": "Metric" }
+        "description": "Pick an HA sensor, one or more VerdiGrow containers/areas it measures, and which metric it is.",
+        "data": {
+          "entity_id": "HA sensor",
+          "metric": "Metric",
+          "targets": "VerdiGrow targets (choose one or more)"
+        }
       },
       "remove_mapping": {
         "title": "Remove mappings",
-        "data": { "remove": "Select mappings to remove" }
+        "data": {
+          "remove": "Select mappings to remove"
+        }
       }
     },
     "abort": {

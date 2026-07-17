@@ -81,18 +81,21 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
         metric_opts = [{"value": m["key"], "label": f"{m['name']} ({m['unit']})"} for m in metrics]
 
         if user_input is not None:
-            tkind, tid = user_input["target"].split(":", 1)
-            self._options[CONF_MAPPINGS].append({
-                "entity_id": user_input["entity_id"],
-                "target": tkind, "id": int(tid), "metric": user_input["metric"],
-            })
+            # One sensor can map to several VerdiGrow targets (e.g. an HA area
+            # sensor feeding both the Garden Wall and the Raised Beds).
+            for target in user_input["targets"]:
+                tkind, tid = target.split(":", 1)
+                self._options[CONF_MAPPINGS].append({
+                    "entity_id": user_input["entity_id"],
+                    "target": tkind, "id": int(tid), "metric": user_input["metric"],
+                })
             return self.async_create_entry(title="", data=self._options)
 
         schema = vol.Schema({
             vol.Required("entity_id"): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["sensor", "binary_sensor", "number"])),
-            vol.Required("target"): selector.SelectSelector(
-                selector.SelectSelectorConfig(options=targets, mode="dropdown")),
+            vol.Required("targets"): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=targets, multiple=True, mode="dropdown")),
             vol.Required("metric"): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=metric_opts, mode="dropdown")),
         })
