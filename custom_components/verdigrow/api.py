@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -26,7 +27,7 @@ class VerdiGrowClient:
     async def _get(self, path: str) -> dict:
         try:
             async with self._session.get(self._url + path, headers=self._headers,
-                                         timeout=15) as r:
+                                         timeout=aiohttp.ClientTimeout(total=15)) as r:
                 if r.status == 401:
                     raise VerdiGrowError("unauthorized (check the API token)")
                 r.raise_for_status()
@@ -57,7 +58,7 @@ class VerdiGrowClient:
         try:
             async with self._session.post(self._url + API_READINGS,
                                           json={"readings": readings},
-                                          headers=self._headers, timeout=30) as r:
+                                          headers=self._headers, timeout=aiohttp.ClientTimeout(total=30)) as r:
                 r.raise_for_status()
                 return await r.json()
         except Exception as e:
