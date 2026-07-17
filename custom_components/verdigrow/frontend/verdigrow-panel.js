@@ -35,19 +35,17 @@ class VerdiGrowPanel extends HTMLElement {
     }
     try {
       if (!PANEL_CACHE || force) {
-        const [catalog, maps, areas, cards] = await Promise.all([
+        const [catalog, maps, areas] = await Promise.all([
           this._hass.callApi("GET", "verdigrow/catalog"),
           this._hass.callApi("GET", "verdigrow/mappings"),
           this._hass.callApi("GET", "verdigrow/areas"),
-          this._hass.callApi("GET", "verdigrow/cards"),
         ]);
         if (catalog.error) throw new Error(catalog.error);
-        PANEL_CACHE = { catalog, maps, areas, cards, at: new Date() };
+        PANEL_CACHE = { catalog, maps, areas, at: new Date() };
       }
       const d = PANEL_CACHE;
       this._catalog = d.catalog;
       this._areas = d.areas || { ha_areas: [], vg_areas: [], area_map: {} };
-      this._cards = (d.cards && d.cards.cards) || [];
       this._cacheAt = d.at;
       this._links = {}; // "target|id|metric" -> entity_id
       this._excludes = {}; // "areaId|metric" -> Set(container ids) manually excluded from ambient
@@ -333,7 +331,9 @@ class VerdiGrowPanel extends HTMLElement {
       </style>
       <div class="vg-wrap">
         <h1>VerdiGrow Link ${this._cacheAt ? `<span class="vg-dim" style="font-size:12px;font-weight:400">· loaded ${this._cacheAt.toLocaleTimeString()}</span>` : ""}</h1>
-        ${this._gardensHtml()}
+        <p class="vg-help">Set up the link between Home Assistant and VerdiGrow: sync areas and map
+          HA sensors to VerdiGrow metrics. Your containers &amp; plants appear as cards on their
+          HA <strong>area</strong> dashboards (native entities), not here.</p>
         ${this._areaSyncHtml()}
         <h2 style="margin:18px 0 4px">Sensor mapping</h2>
         <p class="vg-help">Filter by HA area to cut the sensor list, expand a container (or an
