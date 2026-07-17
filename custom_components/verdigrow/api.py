@@ -73,6 +73,9 @@ class VerdiGrowClient:
     async def async_card(self, pk) -> dict:
         return await self._get(f"{API_CARDS}{pk}/")
 
+    async def async_plant_card(self, pk) -> dict:
+        return await self._get(f"{API_CARDS}plant/{pk}/")
+
     async def async_push(self, readings: list[dict]) -> dict:
         """POST a batch of readings. Each: {metric, value, occurred_at?, entity_id?,
         and one of container_id | container_public_id | area_id | area}."""

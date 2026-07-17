@@ -187,10 +187,11 @@ class VerdiGrowCardsView(HomeAssistantView):
         rt = _runtime(self.hass)
         if not rt:
             return self.json({"error": "VerdiGrow not set up"}, status_code=503)
-        pk = request.query.get("id")
         try:
-            if pk:
-                return self.json(await rt["client"].async_card(pk))
+            if request.query.get("plant"):
+                return self.json(await rt["client"].async_plant_card(request.query["plant"]))
+            if request.query.get("id"):
+                return self.json(await rt["client"].async_card(request.query["id"]))
             return self.json({"cards": await rt["client"].async_cards()})
         except Exception as e:  # noqa: BLE001
             return self.json({"error": str(e)}, status_code=502)
