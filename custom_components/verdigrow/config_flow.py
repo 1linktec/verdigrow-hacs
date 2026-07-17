@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -14,6 +16,7 @@ from .const import (CONF_AREA_LINKS, CONF_INTERVAL, CONF_MAPPINGS, CONF_TOKEN,
                     CONF_URL, DEFAULT_INTERVAL, DOMAIN, TARGET_AREA,
                     TARGET_CONTAINER)
 
+_LOGGER = logging.getLogger(__name__)
 _SENSOR_DOMAINS = ("sensor.", "binary_sensor.", "number.")
 
 
@@ -27,16 +30,15 @@ class VerdiGrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 await client.async_ping()
             except VerdiGrowError as e:
+                _LOGGER.warning("VerdiGrow connect failed: %s", e)
                 errors["base"] = "invalid_auth" if "unauthorized" in str(e) else "cannot_connect"
             else:
                 await self.async_set_unique_id(user_input[CONF_URL])
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title="VerdiGrow", data=user_input)
         schema = vol.Schema({
-            vol.Required(CONF_URL): selector.TextSelector(
-                selector.TextSelectorConfig(type="url")),
-            vol.Required(CONF_TOKEN): selector.TextSelector(
-                selector.TextSelectorConfig(type="password")),
+            vol.Required(CONF_URL): str,
+            vol.Required(CONF_TOKEN): str,
         })
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
