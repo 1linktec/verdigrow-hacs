@@ -27,8 +27,9 @@ from .const import (CONF_INTERVAL, CONF_TOKEN, CONF_URL, CONF_VERIFY_SSL,
                     DEFAULT_INTERVAL, DOMAIN, PANEL_ICON, PANEL_TITLE, PANEL_URL,
                     STATIC_URL, STORAGE_KEY, STORAGE_VERSION,
                     TARGET_AREA, TARGET_CONTAINER)
-from .http_api import (VerdiGrowAreasView, VerdiGrowCatalogView,
-                       VerdiGrowMappingsView, VerdiGrowPushView)
+from .http_api import (VerdiGrowAreasView, VerdiGrowCardsView,
+                       VerdiGrowCatalogView, VerdiGrowMappingsView,
+                       VerdiGrowPushView)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(VerdiGrowCatalogView(hass))
         hass.http.register_view(VerdiGrowMappingsView(hass))
         hass.http.register_view(VerdiGrowAreasView(hass))
+        hass.http.register_view(VerdiGrowCardsView(hass))
         hass.http.register_view(VerdiGrowPushView(hass))
         hass.data[DOMAIN]["_views"] = True
 

@@ -128,6 +128,30 @@ class VerdiGrowAreasView(HomeAssistantView):
         return self.json({"error": "unknown action"}, status_code=400)
 
 
+class VerdiGrowCardsView(HomeAssistantView):
+    """Container cards. GET → the card list; GET ?id=<pk> → one card's detail
+    (metrics + plants with latest photo & note)."""
+
+    url = "/api/verdigrow/cards"
+    name = "api:verdigrow:cards"
+    requires_auth = True
+
+    def __init__(self, hass):
+        self.hass = hass
+
+    async def get(self, request):
+        rt = _runtime(self.hass)
+        if not rt:
+            return self.json({"error": "VerdiGrow not set up"}, status_code=503)
+        pk = request.query.get("id")
+        try:
+            if pk:
+                return self.json(await rt["client"].async_card(pk))
+            return self.json({"cards": await rt["client"].async_cards()})
+        except Exception as e:  # noqa: BLE001
+            return self.json({"error": str(e)}, status_code=502)
+
+
 class VerdiGrowPushView(HomeAssistantView):
     """POST /api/verdigrow/push — push the current map now (for testing)."""
 

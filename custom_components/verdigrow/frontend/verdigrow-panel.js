@@ -6,6 +6,10 @@
 
 const SENSOR_DOMAINS = ["sensor", "binary_sensor", "number"];
 
+// Module-level cache — survives the panel element being recreated when you
+// navigate away and back, so re-opening is instant. Cleared by "Refresh".
+let PANEL_CACHE = null;
+
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -25,20 +29,29 @@ class VerdiGrowPanel extends HTMLElement {
     }
   }
 
-  async _init() {
-    this.innerHTML = `<div style="padding:24px">Loading VerdiGrow…</div>`;
+  async _init(force) {
+    if (!PANEL_CACHE || force) {
+      this.innerHTML = `<div style="padding:24px">Loading VerdiGrow…</div>`;
+    }
     try {
-      const [catalog, maps, areas] = await Promise.all([
-        this._hass.callApi("GET", "verdigrow/catalog"),
-        this._hass.callApi("GET", "verdigrow/mappings"),
-        this._hass.callApi("GET", "verdigrow/areas"),
-      ]);
-      if (catalog.error) throw new Error(catalog.error);
-      this._catalog = catalog;
-      this._areas = areas || { ha_areas: [], vg_areas: [], area_map: {} };
+      if (!PANEL_CACHE || force) {
+        const [catalog, maps, areas, cards] = await Promise.all([
+          this._hass.callApi("GET", "verdigrow/catalog"),
+          this._hass.callApi("GET", "verdigrow/mappings"),
+          this._hass.callApi("GET", "verdigrow/areas"),
+          this._hass.callApi("GET", "verdigrow/cards"),
+        ]);
+        if (catalog.error) throw new Error(catalog.error);
+        PANEL_CACHE = { catalog, maps, areas, cards, at: new Date() };
+      }
+      const d = PANEL_CACHE;
+      this._catalog = d.catalog;
+      this._areas = d.areas || { ha_areas: [], vg_areas: [], area_map: {} };
+      this._cards = (d.cards && d.cards.cards) || [];
+      this._cacheAt = d.at;
       this._links = {}; // "target|id|metric" -> entity_id
       this._excludes = {}; // "areaId|metric" -> Set(container ids) manually excluded from ambient
-      (maps.links || []).forEach((l) => {
+      ((d.maps && d.maps.links) || []).forEach((l) => {
         this._links[`${l.target}|${l.id}|${l.metric}`] = l.entity_id;
         if (l.target === "area" && Array.isArray(l.exclude)) {
           this._excludes[`${l.id}|${l.metric}`] = new Set(l.exclude);
@@ -52,6 +65,8 @@ class VerdiGrowPanel extends HTMLElement {
         Check the VerdiGrow connection in Settings → Devices & Services.</div>`;
     }
   }
+
+  _refresh() { PANEL_CACHE = null; this._init(true); }
 
   _buildHaIndex() {
     const h = this._hass;
@@ -128,6 +143,55 @@ class VerdiGrowPanel extends HTMLElement {
         ${exclUI}
       </div>`;
     }).join("");
+  }
+
+  _gardensHtml() {
+    const cards = this._cards || [];
+    if (!cards.length) return "";
+    const card = (c) => {
+      const occ = (c.occupancy || []).map((o) => `<div class="vg-chartrow"><b>${esc(o.label)}</b> ${
+        o.plants.length
+          ? o.plants.map((p) => `<span class="vg-chip">${esc(p.variety)}${p.count > 1 ? " ×" + p.count : ""}</span>`).join("")
+          : '<span class="vg-dim">empty</span>'}</div>`).join("");
+      return `<div class="vg-card">
+        ${c.image_url ? `<img class="vg-card-img" src="${esc(c.image_url)}" loading="lazy">` : ""}
+        <div class="vg-card-title">${esc(c.label)}</div>
+        <div class="vg-dim">${esc(c.type)}${c.area ? " · " + esc(c.area) : ""} · ${c.plant_count} plant(s)</div>
+        <div class="vg-chart">${occ}</div>
+        <button class="vg-btn secondary vg-card-open" data-card="${c.id}" type="button">View plants &amp; metrics</button>
+      </div>`;
+    };
+    return `<details class="vg-node" open>
+      <summary>🌿 Gardens — ${cards.length} container(s)</summary>
+      <div class="vg-body"><div class="vg-cards">${cards.map(card).join("")}</div></div>
+    </details>`;
+  }
+
+  async _openCard(id) {
+    let d;
+    try { d = await this._hass.callApi("GET", "verdigrow/cards?id=" + id); }
+    catch (e) { alert("Error loading card: " + (e.message || e)); return; }
+    const metrics = (d.metrics || []).map((m) =>
+      `<span class="vg-chip">${esc(m.name)}: ${m.value}${esc(m.unit)}</span>`).join("")
+      || '<span class="vg-dim">no readings yet</span>';
+    const plants = (d.plants || []).map((p) => `<div class="vg-plant">
+        ${p.photo_url ? `<img class="vg-plant-img" src="${esc(p.photo_url)}" loading="lazy">`
+                      : `<div class="vg-plant-img vg-noimg">🌱</div>`}
+        <div style="flex:1"><div class="vg-card-title">${esc(p.label)}</div>
+          <div class="vg-dim">${esc(p.status)} · ${esc(p.where)}</div>
+          ${p.note ? `<div class="vg-note">${esc(p.note)}</div>` : ""}
+        </div></div>`).join("") || '<span class="vg-dim">No plants in this container.</span>';
+    const ov = document.createElement("div");
+    ov.className = "vg-overlay";
+    ov.innerHTML = `<div class="vg-modal">
+        <div class="vg-modal-head"><b>${esc(d.label)}</b>
+          <button class="vg-btn secondary" id="vg-close" type="button">Close</button></div>
+        <div class="vg-dim">${esc(d.type)}${d.area ? " · " + esc(d.area) : ""}</div>
+        <div class="vg-metrics" style="margin:8px 0">${metrics}</div>
+        <h4 style="margin:8px 0 4px">Plants</h4>${plants}
+      </div>`;
+    ov.addEventListener("click", (e) => { if (e.target === ov || e.target.id === "vg-close") ov.remove(); });
+    this.appendChild(ov);
   }
 
   _areaSyncHtml() {
@@ -247,9 +311,29 @@ class VerdiGrowPanel extends HTMLElement {
         .vg-excl-wrap summary{cursor:pointer;font-size:13px}
         .vg-cbs{display:flex;flex-direction:column;gap:2px;padding:6px 0 6px 12px}
         .vg-cb{font-size:13px;display:flex;gap:6px;align-items:center}
+        .vg-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+        .vg-card{border:1px solid var(--divider-color,#e0e0e0);border-radius:10px;padding:10px;
+          display:flex;flex-direction:column;gap:6px;background:var(--card-background-color)}
+        .vg-card-img{width:100%;height:120px;object-fit:cover;border-radius:8px}
+        .vg-card-title{font-weight:600}
+        .vg-chart{display:flex;flex-direction:column;gap:3px;font-size:12px}
+        .vg-chartrow b{color:var(--secondary-text-color);font-weight:600;margin-right:4px}
+        .vg-chip{display:inline-block;background:var(--secondary-background-color,#eee);
+          border-radius:10px;padding:1px 8px;margin:1px 2px;font-size:12px}
+        .vg-metrics{display:flex;flex-wrap:wrap;gap:4px}
+        .vg-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;
+          display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px}
+        .vg-modal{background:var(--card-background-color,#fff);color:var(--primary-text-color);
+          border-radius:12px;padding:16px;max-width:640px;width:100%}
+        .vg-modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+        .vg-plant{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--divider-color,#eee)}
+        .vg-plant-img{width:56px;height:56px;object-fit:cover;border-radius:8px;flex:0 0 auto}
+        .vg-noimg{display:flex;align-items:center;justify-content:center;background:var(--secondary-background-color,#eee);font-size:24px}
+        .vg-note{font-size:13px;color:var(--secondary-text-color);margin-top:2px;white-space:pre-wrap}
       </style>
       <div class="vg-wrap">
-        <h1>VerdiGrow Link</h1>
+        <h1>VerdiGrow Link ${this._cacheAt ? `<span class="vg-dim" style="font-size:12px;font-weight:400">· loaded ${this._cacheAt.toLocaleTimeString()}</span>` : ""}</h1>
+        ${this._gardensHtml()}
         ${this._areaSyncHtml()}
         <h2 style="margin:18px 0 4px">Sensor mapping</h2>
         <p class="vg-help">Filter by HA area to cut the sensor list, expand a container (or an
@@ -265,6 +349,7 @@ class VerdiGrowPanel extends HTMLElement {
           <button class="vg-btn secondary" id="vg-collapse" type="button">Collapse all</button>
           <span id="vg-status" class="vg-status"></span>
           <span style="flex:1"></span>
+          <button class="vg-btn secondary" id="vg-refresh" type="button" title="Reload from VerdiGrow">↻ Refresh</button>
           <button class="vg-btn secondary" id="vg-pushnow" type="button">Push now</button>
           <button class="vg-btn" id="vg-save" type="button">Save mapping</button>
         </div>
@@ -287,6 +372,10 @@ class VerdiGrowPanel extends HTMLElement {
       this.querySelectorAll("details.vg-node").forEach((d) => { d.open = true; }));
     this.querySelector("#vg-collapse").addEventListener("click", () =>
       this.querySelectorAll("details.vg-node").forEach((d) => { d.open = false; }));
+    const rf = this.querySelector("#vg-refresh");
+    if (rf) rf.addEventListener("click", () => this._refresh());
+    this.querySelectorAll(".vg-card-open").forEach((b) =>
+      b.addEventListener("click", () => this._openCard(b.dataset.card)));
     const imp = this.querySelector("#vg-import-areas");
     if (imp) imp.addEventListener("click", () => this._importAreas());
     const sm = this.querySelector("#vg-save-areamap");
