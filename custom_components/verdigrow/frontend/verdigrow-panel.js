@@ -35,10 +35,11 @@ class VerdiGrowPanel extends HTMLElement {
     }
     try {
       if (!PANEL_CACHE || force) {
+        const q = force ? "?fresh=1" : "";
         const [catalog, maps, areas] = await Promise.all([
-          this._hass.callApi("GET", "verdigrow/catalog"),
+          this._hass.callApi("GET", "verdigrow/catalog" + q),
           this._hass.callApi("GET", "verdigrow/mappings"),
-          this._hass.callApi("GET", "verdigrow/areas"),
+          this._hass.callApi("GET", "verdigrow/areas" + q),
         ]);
         if (catalog.error) throw new Error(catalog.error);
         PANEL_CACHE = { catalog, maps, areas, at: new Date() };
@@ -230,7 +231,8 @@ class VerdiGrowPanel extends HTMLElement {
     const st = this.querySelector("#vg-area-status"); if (st) st.textContent = "Importing…";
     try {
       await this._hass.callApi("POST", "verdigrow/areas", { action: "import", names });
-      this._areas = await this._hass.callApi("GET", "verdigrow/areas");
+      this._areas = await this._hass.callApi("GET", "verdigrow/areas?fresh=1");
+      if (PANEL_CACHE) PANEL_CACHE.areas = this._areas;
       this._render();
     } catch (e) { if (st) st.textContent = "Error: " + (e.message || e); }
   }

@@ -9,7 +9,9 @@ VerdiGrow.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers import area_registry as ar
@@ -17,6 +19,27 @@ from homeassistant.helpers import area_registry as ar
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# Short server-side cache so opening/reloading the panel is fast even after a
+# full page reload (bypass/refresh with ?fresh=1).
+_CACHE: dict = {}
+_TTL = 120.0
+
+
+def _cache_get(key):
+    hit = _CACHE.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    return None
+
+
+def _cache_put(key, data):
+    _CACHE[key] = (time.monotonic() + _TTL, data)
+
+
+def _cache_clear(*keys):
+    for k in keys:
+        _CACHE.pop(k, None)
 
 
 def _runtime(hass):
@@ -37,14 +60,19 @@ class VerdiGrowCatalogView(HomeAssistantView):
         rt = _runtime(self.hass)
         if not rt:
             return self.json({"error": "VerdiGrow not set up"}, status_code=503)
+        if not request.query.get("fresh"):
+            cached = _cache_get("catalog")
+            if cached is not None:
+                return self.json(cached)
         client = rt["client"]
         try:
-            return self.json({
-                "containers": await client.async_containers(),
-                "areas": await client.async_areas(),
-                "plants": await client.async_plants(),
-                "metric_types": await client.async_metric_types(),
-            })
+            containers, areas, plants, metric_types = await asyncio.gather(
+                client.async_containers(), client.async_areas(),
+                client.async_plants(), client.async_metric_types())
+            data = {"containers": containers, "areas": areas,
+                    "plants": plants, "metric_types": metric_types}
+            _cache_put("catalog", data)
+            return self.json(data)
         except Exception as e:  # noqa: BLE001 — surface to the panel
             _LOGGER.warning("catalog fetch failed: %s", e)
             return self.json({"error": str(e)}, status_code=502)
@@ -101,10 +129,13 @@ class VerdiGrowAreasView(HomeAssistantView):
         areg = ar.async_get(self.hass)
         ha = sorted(({"area_id": a.id, "name": a.name} for a in areg.async_list_areas()),
                     key=lambda x: (x["name"] or "").lower())
-        try:
-            vg = await rt["client"].async_areas()
-        except Exception as e:  # noqa: BLE001
-            return self.json({"error": str(e)}, status_code=502)
+        vg = _cache_get("vg_areas") if not request.query.get("fresh") else None
+        if vg is None:
+            try:
+                vg = await rt["client"].async_areas()
+            except Exception as e:  # noqa: BLE001
+                return self.json({"error": str(e)}, status_code=502)
+            _cache_put("vg_areas", vg)
         data = await rt["store"].async_load() or {}
         return self.json({"ha_areas": ha, "vg_areas": vg,
                           "area_map": data.get("area_map", {})})
@@ -117,7 +148,9 @@ class VerdiGrowAreasView(HomeAssistantView):
         action = body.get("action")
         if action == "import":
             try:
-                return self.json(await rt["client"].async_import_areas(body.get("names", [])))
+                result = await rt["client"].async_import_areas(body.get("names", []))
+                _cache_clear("vg_areas", "catalog")  # areas changed
+                return self.json(result)
             except Exception as e:  # noqa: BLE001
                 return self.json({"error": str(e)}, status_code=502)
         if action == "map":
