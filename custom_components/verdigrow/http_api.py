@@ -153,6 +153,17 @@ class VerdiGrowAreasView(HomeAssistantView):
                 return self.json(result)
             except Exception as e:  # noqa: BLE001
                 return self.json({"error": str(e)}, status_code=502)
+        if action == "create_ha_areas":
+            # Create HA areas for VerdiGrow-owned areas the grower chose to add.
+            areg = ar.async_get(self.hass)
+            created = {}
+            for name in body.get("names", []):
+                name = (name or "").strip()
+                if not name:
+                    continue
+                entry = areg.async_get_area_by_name(name) or areg.async_create(name)
+                created[name] = entry.id
+            return self.json({"created": created})
         if action == "map":
             data = await rt["store"].async_load() or {}
             data["area_map"] = body.get("area_map", {})
