@@ -1,52 +1,45 @@
-# VerdiGrow — Home Assistant Integration
+# VerdiGrow — Home Assistant integration
 
-Companion integration for [VerdiGrow](https://github.com/1linktec/verdigrow), a
-self-hosted grower's record system built on the tagged container as the atom.
+Push Home Assistant sensor readings into [VerdiGrow](https://github.com/1linktec/verdigrow),
+the self-hosted grower's record system. **HA stays the sensor hub; VerdiGrow just
+stores the metrics.** You choose which HA sensors map to which VerdiGrow container
+or area, and this integration pushes their values on a schedule (default: once
+per hour).
 
-## What it does
+## Install (HACS custom repository)
 
-Surfaces your VerdiGrow containers into Home Assistant as native entities, so you can
-build area dashboards that combine plant data with your existing cameras, irrigation
-switches and sensors.
+1. HACS → ⋮ → **Custom repositories** → add
+   `https://github.com/1linktec/verdigrow-hacs`, category **Integration** → **Add**.
+2. Install **VerdiGrow**, then **restart Home Assistant**.
+3. Settings → Devices & Services → **Add Integration** → **VerdiGrow**.
 
-Per container:
+## Configure
 
-- Current plant (variety + sow date)
-- Days since sow · days to maturity countdown
-- Latest metric values
-- Needs-attention flag
-- Latest photo
-- Link into the VerdiGrow panel
+Add-integration dialog:
 
-Plus a **VerdiGrow panel** — the app embedded as an HTTPS iframe for daily interaction.
+- **URL** — your VerdiGrow address (e.g. `https://verdigrow.thehopes.ca` or
+  `http://<host>:8095`).
+- **API token** — the `API_TOKEN` from your VerdiGrow `.env`.
 
-## Install
+Then open the integration's **Configure**:
 
-HACS → ⋮ → Custom repositories → add `https://github.com/1linktec/verdigrow-hacs`
-(category: Integration) → Install → restart HA.
+- **Update frequency** — seconds between pushes (default **3600 = 1 hour**; keeps
+  the database from filling up).
+- **Add a sensor mapping** — pick an HA sensor, the VerdiGrow **container** or
+  **area** it measures, and the **metric** (soil moisture, pH, air temp, …).
+  An *area* mapping fans out to every container currently in that area. Map as
+  many sensors as you like; one sensor can map to several targets.
+- **Remove sensor mappings** — prune mappings.
 
-Then: Settings → Devices & Services → Add Integration → VerdiGrow. Provide your
-VerdiGrow URL and API token (generate it in the VerdiGrow console).
+Readings appear on the container/plant **charts** in VerdiGrow. The integration
+never renders dashboards and never touches hardware — it only reads mapped HA
+states and pushes them.
 
-## Requirements
+## Roadmap (later versions)
 
-- A running [VerdiGrow](https://github.com/1linktec/verdigrow) instance
-- **Served over HTTPS** — HA won't embed HTTP content into an HTTPS page
-
-## ⚠️ Photos
-
-HA's Android Companion app [cannot open the camera from an HTML file input](https://github.com/home-assistant/android/issues/6055) —
-open since Nov 2025. VerdiGrow works around it: set `allow_open_top_navigation: true`
-on your webpage card and the "Add photo" button breaks out to Chrome, where the camera
-works. Container and plant context ride in the URL.
-
-```yaml
-type: iframe
-url: https://verdigrow.local/panel
-allow_open_top_navigation: true   # required for photo capture
-```
-
-This will be removed when the upstream bug is fixed.
+- VerdiGrow objects as **native HA entities/cards** (device per container/plant,
+  area assignment, latest photo) for HA dashboards.
+- The VerdiGrow **panel** embedded in HA for daily interaction.
 
 ## License
 

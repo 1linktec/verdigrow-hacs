@@ -2,18 +2,22 @@
 
 DOMAIN = "verdigrow"
 
+# Config entry data
 CONF_URL = "url"
 CONF_TOKEN = "token"
 
-DEFAULT_SCAN_INTERVAL = 60
+# Options
+CONF_INTERVAL = "update_interval"      # seconds between pushes
+DEFAULT_INTERVAL = 3600                # once per hour (don't flood the DB)
+CONF_MAPPINGS = "mappings"             # list of {entity_id, target, id, metric}
 
-# Panel — VerdiGrow is embedded as an HTTPS iframe.
-#
-# NOTE: the Lovelace webpage card pointing at VerdiGrow must set
-#   allow_open_top_navigation: true
-# so the "Add photo" button can break out to Chrome. HA's Android WebView
-# cannot open the camera from an HTML file input:
-#   https://github.com/home-assistant/android/issues/6055
-PANEL_URL_PATH = "verdigrow"
-PANEL_TITLE = "VerdiGrow"
-PANEL_ICON = "mdi:sprout"
+# Mapping target kinds
+TARGET_CONTAINER = "container"
+TARGET_AREA = "area"
+
+# VerdiGrow API paths (token-authenticated, Bearer)
+API_PING = "/api/ping/"
+API_CONTAINERS = "/api/containers/"
+API_AREAS = "/api/areas/"
+API_METRIC_TYPES = "/api/metric-types/"
+API_READINGS = "/api/readings/"

@@ -1,0 +1,47 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to VerdiGrow",
+        "description": "Enter your VerdiGrow URL and API token (Garden Setup shows the token / set API_TOKEN).",
+        "data": { "url": "VerdiGrow URL", "token": "API token" }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach VerdiGrow at that URL.",
+      "invalid_auth": "The API token was rejected."
+    },
+    "abort": {
+      "already_configured": "This VerdiGrow instance is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "VerdiGrow options",
+        "menu_options": {
+          "interval": "Update frequency",
+          "add_mapping": "Add a sensor mapping",
+          "remove_mapping": "Remove sensor mappings"
+        }
+      },
+      "interval": {
+        "title": "Update frequency",
+        "data": { "update_interval": "Seconds between pushes" }
+      },
+      "add_mapping": {
+        "title": "Map an HA sensor to VerdiGrow",
+        "description": "Pick an HA sensor, the VerdiGrow container or area it measures, and which metric it is.",
+        "data": { "entity_id": "HA sensor", "target": "VerdiGrow target", "metric": "Metric" }
+      },
+      "remove_mapping": {
+        "title": "Remove mappings",
+        "data": { "remove": "Select mappings to remove" }
+      }
+    },
+    "abort": {
+      "cannot_connect": "Could not reach VerdiGrow to load containers/areas.",
+      "no_mappings": "There are no mappings to remove yet."
+    }
+  }
+}
