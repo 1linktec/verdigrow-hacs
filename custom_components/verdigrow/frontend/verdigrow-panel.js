@@ -281,26 +281,22 @@ class VerdiGrowPanel extends HTMLElement {
     const plantByContainer = {};
     (c.plants || []).forEach((p) => { if (p.container_id) plantByContainer[p.container_id] = p.label; });
 
-    const containerNode = (ct) => `
-      <details class="vg-node">
-        <summary>🪣 ${esc(ct.label)} <span class="vg-dim">· ${esc(ct.type)}${
-          plantByContainer[ct.id] ? " · 🌱 " + esc(plantByContainer[ct.id]) : ""}</span></summary>
-        <div class="vg-body">${this._metricRows("container", ct.id)}</div>
-      </details>`;
+    // Keep the data so node bodies can be built lazily (on expand) — building
+    // all 137 nodes' rows up front is what made the panel slow.
+    this._containersByArea = containersByArea;
+    this._plantByContainer = plantByContainer;
+    this._unassigned = unassigned;
 
     const areaNodes = (c.areas || []).map((a) => `
-      <details class="vg-node">
+      <details class="vg-node" data-node="a:${a.id}">
         <summary>📍 ${esc(a.name)} <span class="vg-dim">· ambient — applies to every container in this area</span></summary>
-        <div class="vg-body">
-          ${this._areaMetricRows(a, containersByArea[a.id] || [])}
-          ${(containersByArea[a.id] || []).map(containerNode).join("")}
-        </div>
+        <div class="vg-body" data-lazy="1"></div>
       </details>`).join("");
 
     const unassignedNode = unassigned.length ? `
-      <details class="vg-node">
+      <details class="vg-node" data-node="u">
         <summary>🪣 Containers with no area</summary>
-        <div class="vg-body">${unassigned.map(containerNode).join("")}</div>
+        <div class="vg-body" data-lazy="1"></div>
       </details>` : "";
 
     const areaOptions = Object.values(this._haAreas)
@@ -383,25 +379,24 @@ class VerdiGrowPanel extends HTMLElement {
     this._filterEl = this.querySelector("#vg-filter");
     this._searchEl = this.querySelector("#vg-search");
     this._statusEl = this.querySelector("#vg-status");
-    this._selects = Array.from(this.querySelectorAll(".vg-pick"));
+    this._selects = [];  // grows as node bodies are built on expand
     this._filterEl.value = this._filterArea;
     this._searchEl.value = this._search;
 
-    this._selects.forEach((s) => s.addEventListener("change", () => { s.dataset.current = s.value; }));
     this._filterEl.addEventListener("change", () => { this._filterArea = this._filterEl.value; this._refill(); });
     this._searchEl.addEventListener("input", () => { this._search = this._searchEl.value; this._refill(); });
     this.querySelector("#vg-save").addEventListener("click", () => this._save());
     this.querySelector("#vg-pushnow").addEventListener("click", () => this._pushNow());
     this.querySelector("#vg-expand").addEventListener("click", () => {
-      this.querySelectorAll("details.vg-node").forEach((d) => { d.open = true; });
+      this.querySelectorAll("details.vg-node").forEach((d) => { d.open = true; this._buildNodeBody(d); });
       this._fillVisible();
     });
     this.querySelector("#vg-collapse").addEventListener("click", () =>
       this.querySelectorAll("details.vg-node").forEach((d) => { d.open = false; }));
-    // Lazy fill: only populate a select's 1800+ options when its row becomes
-    // visible (its <details> opens) — filling all ~685 up front froze the page.
+    // Lazy: build a node's rows AND fill its selects only when it opens —
+    // building all 137 nodes' rows + ~685 selects up front froze the page.
     this.addEventListener("toggle", (e) => {
-      if (e.target && e.target.open) this._fillVisible();
+      if (e.target && e.target.open) { this._buildNodeBody(e.target); this._fillVisible(); }
     }, true);
     const rf = this.querySelector("#vg-refresh");
     if (rf) rf.addEventListener("click", () => this._refresh());
@@ -410,6 +405,40 @@ class VerdiGrowPanel extends HTMLElement {
     const sm = this.querySelector("#vg-save-areamap");
     if (sm) sm.addEventListener("click", () => this._saveAreaMap());
     this._updateStatus();
+  }
+
+  _containerSummary(ct) {
+    const plant = this._plantByContainer[ct.id];
+    return `<details class="vg-node" data-node="c:${ct.id}">
+      <summary>🪣 ${esc(ct.label)} <span class="vg-dim">· ${esc(ct.type)}${plant ? " · 🌱 " + esc(plant) : ""}</span></summary>
+      <div class="vg-body" data-lazy="1"></div>
+    </details>`;
+  }
+
+  _buildNodeBody(details) {
+    const body = details.querySelector(":scope > .vg-body");
+    if (!body || !body.dataset.lazy) return;
+    const node = details.dataset.node || "";
+    let html = "";
+    if (node.startsWith("c:")) {
+      html = this._metricRows("container", parseInt(node.slice(2), 10));
+    } else if (node.startsWith("a:")) {
+      const id = parseInt(node.slice(2), 10);
+      const area = (this._catalog.areas || []).find((x) => x.id === id);
+      const conts = this._containersByArea[id] || [];
+      html = this._areaMetricRows(area, conts) + conts.map((ct) => this._containerSummary(ct)).join("");
+    } else if (node === "u") {
+      html = (this._unassigned || []).map((ct) => this._containerSummary(ct)).join("");
+    }
+    body.innerHTML = html;
+    delete body.dataset.lazy;
+    // Track new selects in this body (for filtering + fill), wire change.
+    Array.from(body.querySelectorAll(".vg-pick")).forEach((s) => {
+      if (!this._selects.includes(s)) {
+        s.addEventListener("change", () => { s.dataset.current = s.value; });
+        this._selects.push(s);
+      }
+    });
   }
 
   _updateStatus() {
@@ -453,22 +482,32 @@ class VerdiGrowPanel extends HTMLElement {
   }
 
   _gather() {
-    const links = [];
-    this._selects.filter((s) => s.value).forEach((s) => {
-      const link = {
-        target: s.dataset.target, id: Number(s.dataset.id),
-        metric: s.dataset.metric, entity_id: s.value,
-      };
+    // Start from the loaded mappings so nodes that were never expanded (their
+    // selects don't exist yet) aren't dropped, then apply edits from any built
+    // selects.
+    const byKey = {};
+    for (const k in this._links) {
+      const [target, id, metric] = k.split("|");
+      const link = { target, id: Number(id), metric, entity_id: this._links[k] };
+      if (target === "area" && this._excludes[id + "|" + metric]) {
+        link.exclude = Array.from(this._excludes[id + "|" + metric]);
+      }
+      byKey[k] = link;
+    }
+    this._selects.forEach((s) => {
+      const key = `${s.dataset.target}|${s.dataset.id}|${s.dataset.metric}`;
+      if (!s.value) { delete byKey[key]; return; }
+      const link = { target: s.dataset.target, id: Number(s.dataset.id),
+                     metric: s.dataset.metric, entity_id: s.value };
       if (s.dataset.target === "area") {
-        // Manual excludes = containers unchecked and not auto-disabled.
         link.exclude = Array.from(this.querySelectorAll(
           `.vg-excl[data-area="${s.dataset.id}"][data-metric="${s.dataset.metric}"]`))
           .filter((cb) => !cb.disabled && !cb.checked)
           .map((cb) => Number(cb.dataset.container));
       }
-      links.push(link);
+      byKey[key] = link;
     });
-    return links;
+    return Object.values(byKey);
   }
 
   async _save() {
