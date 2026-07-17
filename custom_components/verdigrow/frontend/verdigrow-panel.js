@@ -28,12 +28,14 @@ class VerdiGrowPanel extends HTMLElement {
   async _init() {
     this.innerHTML = `<div style="padding:24px">Loading VerdiGrow…</div>`;
     try {
-      const [catalog, maps] = await Promise.all([
+      const [catalog, maps, areas] = await Promise.all([
         this._hass.callApi("GET", "verdigrow/catalog"),
         this._hass.callApi("GET", "verdigrow/mappings"),
+        this._hass.callApi("GET", "verdigrow/areas"),
       ]);
       if (catalog.error) throw new Error(catalog.error);
       this._catalog = catalog;
+      this._areas = areas || { ha_areas: [], vg_areas: [], area_map: {} };
       this._links = {}; // "target|id|metric" -> entity_id
       this._excludes = {}; // "areaId|metric" -> Set(container ids) manually excluded from ambient
       (maps.links || []).forEach((l) => {
@@ -128,6 +130,60 @@ class VerdiGrowPanel extends HTMLElement {
     }).join("");
   }
 
+  _areaSyncHtml() {
+    const a = this._areas || { ha_areas: [], vg_areas: [], area_map: {} };
+    const vgNames = new Set(a.vg_areas.map((v) => (v.name || "").toLowerCase()));
+    const haNames = new Set(a.ha_areas.map((h) => (h.name || "").toLowerCase()));
+    const missing = a.ha_areas.filter((h) => !vgNames.has((h.name || "").toLowerCase()));
+    const vgOnly = a.vg_areas.filter((v) => !haNames.has((v.name || "").toLowerCase()));
+    const matched = a.vg_areas.length - vgOnly.length;
+    const vgRows = vgOnly.map((v) => `
+      <div class="vg-row"><span class="vg-metric">${esc(v.name)}</span>
+        <select class="vg-areamap" data-vg="${v.id}">
+          <option value="">— not in HA —</option>
+          ${a.ha_areas.map((h) => `<option value="${esc(h.area_id)}" ${a.area_map[v.id] === h.area_id ? "selected" : ""}>${esc(h.name)}</option>`).join("")}
+        </select></div>`).join("");
+    return `
+      <details class="vg-node" ${missing.length ? "open" : ""}>
+        <summary>🔗 Area sync — ${matched} matched · ${missing.length} to import · ${vgOnly.length} to map</summary>
+        <div class="vg-body">
+          ${missing.length
+            ? `<p class="vg-dim">In HA but not VerdiGrow: ${missing.map((m) => esc(m.name)).join(", ")}</p>
+               <button class="vg-btn" id="vg-import-areas" type="button">Import ${missing.length} HA area(s) into VerdiGrow</button>`
+            : `<p class="vg-dim">Every HA area exists in VerdiGrow ✓</p>`}
+          ${vgOnly.length
+            ? `<p class="vg-dim" style="margin-top:12px">VerdiGrow areas not found in HA — map each to an HA area (optional):</p>
+               ${vgRows}
+               <button class="vg-btn secondary" id="vg-save-areamap" type="button" style="margin-top:6px">Save area mapping</button>`
+            : ""}
+          <div><span id="vg-area-status" class="vg-status"></span></div>
+        </div>
+      </details>`;
+  }
+
+  async _importAreas() {
+    const a = this._areas;
+    const vgNames = new Set(a.vg_areas.map((v) => (v.name || "").toLowerCase()));
+    const names = a.ha_areas.filter((h) => !vgNames.has((h.name || "").toLowerCase())).map((h) => h.name);
+    const st = this.querySelector("#vg-area-status"); if (st) st.textContent = "Importing…";
+    try {
+      await this._hass.callApi("POST", "verdigrow/areas", { action: "import", names });
+      this._areas = await this._hass.callApi("GET", "verdigrow/areas");
+      this._render();
+    } catch (e) { if (st) st.textContent = "Error: " + (e.message || e); }
+  }
+
+  async _saveAreaMap() {
+    const map = {};
+    this.querySelectorAll(".vg-areamap").forEach((s) => { if (s.value) map[s.dataset.vg] = s.value; });
+    const st = this.querySelector("#vg-area-status"); if (st) st.textContent = "Saving…";
+    try {
+      await this._hass.callApi("POST", "verdigrow/areas", { action: "map", area_map: map });
+      this._areas.area_map = map;
+      if (st) st.textContent = "Area mapping saved.";
+    } catch (e) { if (st) st.textContent = "Error: " + (e.message || e); }
+  }
+
   _render() {
     const c = this._catalog;
     const containersByArea = {};
@@ -193,7 +249,9 @@ class VerdiGrowPanel extends HTMLElement {
         .vg-cb{font-size:13px;display:flex;gap:6px;align-items:center}
       </style>
       <div class="vg-wrap">
-        <h1>VerdiGrow Link — Sensor Mapping</h1>
+        <h1>VerdiGrow Link</h1>
+        ${this._areaSyncHtml()}
+        <h2 style="margin:18px 0 4px">Sensor mapping</h2>
         <p class="vg-help">Filter by HA area to cut the sensor list, expand a container (or an
           area), and pick a sensor for each metric. A sensor on a <strong>container</strong>
           (bed, row, pot, bucket, tray) is <em>dedicated</em>. A sensor on an <strong>area</strong>
@@ -229,6 +287,10 @@ class VerdiGrowPanel extends HTMLElement {
       this.querySelectorAll("details.vg-node").forEach((d) => { d.open = true; }));
     this.querySelector("#vg-collapse").addEventListener("click", () =>
       this.querySelectorAll("details.vg-node").forEach((d) => { d.open = false; }));
+    const imp = this.querySelector("#vg-import-areas");
+    if (imp) imp.addEventListener("click", () => this._importAreas());
+    const sm = this.querySelector("#vg-save-areamap");
+    if (sm) sm.addEventListener("click", () => this._saveAreaMap());
     this._fillSelects();
   }
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.helpers import area_registry as ar
 
 from .const import DOMAIN
 
@@ -74,9 +75,57 @@ class VerdiGrowMappingsView(HomeAssistantView):
         links = body.get("links", [])
         if not isinstance(links, list):
             return self.json({"error": "'links' must be a list"}, status_code=400)
-        await rt["store"].async_save({"links": links})
+        data = await rt["store"].async_load() or {}
+        data["links"] = links  # preserve other keys (e.g. area_map)
+        await rt["store"].async_save(data)
         await rt["push"]()  # push straight away so it appears without waiting
         return self.json({"ok": True, "count": len(links)})
+
+
+class VerdiGrowAreasView(HomeAssistantView):
+    """Area sync. GET → HA areas + VerdiGrow areas + the stored VG→HA map.
+    POST {action:'import', names:[…]} → create missing VG areas (matched by name).
+    POST {action:'map', area_map:{vg_id: ha_area_id}} → save the mapping."""
+
+    url = "/api/verdigrow/areas"
+    name = "api:verdigrow:areas"
+    requires_auth = True
+
+    def __init__(self, hass):
+        self.hass = hass
+
+    async def get(self, request):
+        rt = _runtime(self.hass)
+        if not rt:
+            return self.json({"error": "VerdiGrow not set up"}, status_code=503)
+        areg = ar.async_get(self.hass)
+        ha = sorted(({"area_id": a.id, "name": a.name} for a in areg.async_list_areas()),
+                    key=lambda x: (x["name"] or "").lower())
+        try:
+            vg = await rt["client"].async_areas()
+        except Exception as e:  # noqa: BLE001
+            return self.json({"error": str(e)}, status_code=502)
+        data = await rt["store"].async_load() or {}
+        return self.json({"ha_areas": ha, "vg_areas": vg,
+                          "area_map": data.get("area_map", {})})
+
+    async def post(self, request):
+        rt = _runtime(self.hass)
+        if not rt:
+            return self.json({"error": "VerdiGrow not set up"}, status_code=503)
+        body = await request.json()
+        action = body.get("action")
+        if action == "import":
+            try:
+                return self.json(await rt["client"].async_import_areas(body.get("names", [])))
+            except Exception as e:  # noqa: BLE001
+                return self.json({"error": str(e)}, status_code=502)
+        if action == "map":
+            data = await rt["store"].async_load() or {}
+            data["area_map"] = body.get("area_map", {})
+            await rt["store"].async_save(data)
+            return self.json({"ok": True})
+        return self.json({"error": "unknown action"}, status_code=400)
 
 
 class VerdiGrowPushView(HomeAssistantView):

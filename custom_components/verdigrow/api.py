@@ -8,8 +8,8 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import (API_AREAS, API_CONTAINERS, API_METRIC_TYPES, API_PING,
-                    API_PLANTS, API_READINGS)
+from .const import (API_AREAS, API_AREAS_IMPORT, API_CONTAINERS,
+                    API_METRIC_TYPES, API_PING, API_PLANTS, API_READINGS)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +52,17 @@ class VerdiGrowClient:
 
     async def async_areas(self) -> list[dict]:
         return (await self._get(API_AREAS)).get("areas", [])
+
+    async def async_import_areas(self, names: list[str]) -> dict:
+        """Create VerdiGrow areas from HA area names (idempotent, matched by name)."""
+        try:
+            async with self._session.post(
+                self._url + API_AREAS_IMPORT, json={"names": names},
+                headers=self._headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
+                r.raise_for_status()
+                return await r.json()
+        except Exception as e:
+            raise VerdiGrowError(str(e)) from e
 
     async def async_metric_types(self) -> list[dict]:
         return (await self._get(API_METRIC_TYPES)).get("metric_types", [])
