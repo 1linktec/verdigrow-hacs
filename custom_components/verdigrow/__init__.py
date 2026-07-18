@@ -158,14 +158,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         frontend_dir = str(Path(__file__).parent / "frontend")
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, frontend_dir, False)])
+        # Version-stamp the static URLs so a new release busts the browser AND the
+        # Companion-app WebView cache (which otherwise serves a stale card/panel).
+        try:
+            integration = await hass.async_add_executor_job(
+                lambda: __import__("json").loads(
+                    (Path(__file__).parent / "manifest.json").read_text()))
+            ver = integration.get("version")
+        except Exception:  # noqa: BLE001 — cache-bust is best-effort
+            ver = None
+        stamp = f"?v={ver}" if ver else ""
         # Load the custom Lovelace card so `custom:verdigrow-container-card` works.
         from homeassistant.components.frontend import add_extra_js_url
-        add_extra_js_url(hass, f"{STATIC_URL}/verdigrow-card.js")
+        add_extra_js_url(hass, f"{STATIC_URL}/verdigrow-card.js{stamp}")
         await panel_custom.async_register_panel(
             hass,
             frontend_url_path=PANEL_URL,
             webcomponent_name="verdigrow-panel",
-            module_url=f"{STATIC_URL}/verdigrow-panel.js",
+            module_url=f"{STATIC_URL}/verdigrow-panel.js{stamp}",
             sidebar_title=PANEL_TITLE,
             sidebar_icon=PANEL_ICON,
             require_admin=False,

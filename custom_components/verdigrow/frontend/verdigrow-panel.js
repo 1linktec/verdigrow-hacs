@@ -225,9 +225,53 @@ class VerdiGrowPanel extends HTMLElement {
                ${vgRows}
                <button class="vg-btn secondary" id="vg-save-areamap" type="button" style="margin-top:6px">Save</button>`
             : ""}
+          ${this._areaManageHtml(a)}
           <div><span id="vg-area-status" class="vg-status"></span></div>
         </div>
       </details>`;
+  }
+
+  // Walk back a sync: list every VerdiGrow area with a Remove button. Removing
+  // un-imports it from VerdiGrow (and drops any VG→HA mapping); it never touches
+  // the HA area. Blocked while the area still holds containers.
+  _areaManageHtml(a) {
+    if (!a.vg_areas.length) return "";
+    const byArea = this._containersByArea || {};
+    const haById = {};
+    (a.ha_areas || []).forEach((h) => { haById[h.area_id] = h.name; });
+    const rows = a.vg_areas.slice()
+      .sort((x, y) => (x.name || "").localeCompare(y.name || ""))
+      .map((v) => {
+        const n = (byArea[v.id] || []).length;
+        const mapped = a.area_map[v.id] ? haById[a.area_map[v.id]] : null;
+        const tail = n
+          ? `<span class="vg-dim">${n} container(s) — move them first</span>`
+          : `<button class="vg-btn secondary vg-area-del" data-id="${v.id}" data-name="${esc(v.name)}" type="button">Remove</button>`;
+        return `<div class="vg-row"><span class="vg-metric">${esc(v.name)}${mapped ? ` <span class="vg-dim">→ ${esc(mapped)}</span>` : ""}</span>${tail}</div>`;
+      }).join("");
+    return `
+      <details class="vg-node" style="margin-top:14px">
+        <summary>🗑 Remove VerdiGrow areas (walk back a sync)</summary>
+        <div class="vg-body">
+          <p class="vg-dim">Removing un-imports an area from VerdiGrow only — the HA area stays.</p>
+          ${rows}
+        </div>
+      </details>`;
+  }
+
+  async _removeArea(id, name) {
+    if (!confirm(`Remove “${name}” from VerdiGrow?\n\nThis deletes the VerdiGrow area (the HA area is untouched).`)) return;
+    const st = this.querySelector("#vg-area-status");
+    if (st) st.textContent = "Removing…";
+    try {
+      const res = await this._hass.callApi("POST", "verdigrow/areas",
+        { action: "delete_vg", id: Number(id) });
+      if (res && res.error) { if (st) st.textContent = "Can't remove: " + res.error; return; }
+      this._areas = await this._hass.callApi("GET", "verdigrow/areas?fresh=1");
+      if (PANEL_CACHE) PANEL_CACHE.areas = this._areas;
+      if (st) st.textContent = `Removed “${name}”.`;
+      this._render();
+    } catch (e) { if (st) st.textContent = "Error: " + (e.message || e); }
   }
 
   async _importAreas() {
@@ -410,6 +454,8 @@ class VerdiGrowPanel extends HTMLElement {
     if (imp) imp.addEventListener("click", () => this._importAreas());
     const sm = this.querySelector("#vg-save-areamap");
     if (sm) sm.addEventListener("click", () => this._saveAreaMap());
+    this.querySelectorAll(".vg-area-del").forEach((b) =>
+      b.addEventListener("click", () => this._removeArea(b.dataset.id, b.dataset.name)));
     this._updateStatus();
   }
 

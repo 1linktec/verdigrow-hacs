@@ -8,8 +8,9 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import (API_AREAS, API_AREAS_IMPORT, API_CARDS, API_CONTAINERS,
-                    API_METRIC_TYPES, API_PING, API_PLANTS, API_READINGS)
+from .const import (API_AREAS, API_AREAS_DELETE, API_AREAS_IMPORT, API_CARDS,
+                    API_CONTAINERS, API_METRIC_TYPES, API_PING, API_PLANTS,
+                    API_READINGS)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +62,21 @@ class VerdiGrowClient:
                 headers=self._headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
                 r.raise_for_status()
                 return await r.json()
+        except Exception as e:
+            raise VerdiGrowError(str(e)) from e
+
+    async def async_delete_area(self, area_id) -> dict:
+        """Un-import a VerdiGrow area. Returns the API's JSON either way — a
+        guard failure (containers/history) comes back as {"error": ...} with 400,
+        NOT an exception, so the panel can show the reason."""
+        try:
+            async with self._session.post(
+                self._url + API_AREAS_DELETE, json={"id": area_id},
+                headers=self._headers, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                try:
+                    return await r.json()
+                except Exception:  # noqa: BLE001 — non-JSON body
+                    return {"error": f"HTTP {r.status}"}
         except Exception as e:
             raise VerdiGrowError(str(e)) from e
 

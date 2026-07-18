@@ -169,6 +169,24 @@ class VerdiGrowAreasView(HomeAssistantView):
             data["area_map"] = body.get("area_map", {})
             await rt["store"].async_save(data)
             return self.json({"ok": True})
+        if action == "delete_vg":
+            # Un-import: delete the VG area (guarded server-side) and drop any
+            # stored VG→HA mapping for it. Does NOT touch the HA area.
+            vg_id = body.get("id")
+            try:
+                result = await rt["client"].async_delete_area(vg_id)
+            except Exception as e:  # noqa: BLE001
+                return self.json({"error": str(e)}, status_code=502)
+            if result.get("ok"):
+                data = await rt["store"].async_load() or {}
+                amap = data.get("area_map") or {}
+                if amap.pop(str(vg_id), None) is not None or amap.pop(vg_id, None) is not None:
+                    data["area_map"] = amap
+                    await rt["store"].async_save(data)
+                _cache_clear("vg_areas", "catalog")
+            # Guard failures ({"error": …}) come back as 200 so the panel can
+            # read and show the reason (callApi rejects on non-2xx).
+            return self.json(result)
         return self.json({"error": "unknown action"}, status_code=400)
 
 
