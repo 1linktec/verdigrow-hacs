@@ -12,11 +12,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import timedelta
 from urllib.parse import quote, urlsplit
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers import area_registry as ar
+
+try:  # HA re-exports it here; fall back to the submodule on older cores
+    from homeassistant.components.http import async_sign_path
+except ImportError:  # pragma: no cover
+    from homeassistant.components.http.auth import async_sign_path
 
 from .const import DOMAIN
 
@@ -29,25 +35,32 @@ _MEDIA_PROXY = "/api/verdigrow/photo"
 _IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif")
 
 
-def _proxy_media(url):
-    """Rewrite a VerdiGrow photo URL to the HA same-origin proxy (keeps only the
-    path, so scheme/host/mixed-content stop mattering)."""
+def _proxy_media(hass, url):
+    """Rewrite a VerdiGrow photo URL to the HA same-origin proxy, SIGNED so an
+    <img> tag can load it without an auth header (HA's authSig mechanism, same as
+    camera snapshots). Keeps only the path, so scheme/host/mixed-content stop
+    mattering."""
     if not url:
         return url
     parts = urlsplit(url)
     path = parts.path + (("?" + parts.query) if parts.query else "")
-    return f"{_MEDIA_PROXY}?p={quote(path, safe='')}"
+    proxied = f"{_MEDIA_PROXY}?p={quote(path, safe='')}"
+    try:
+        # Long expiry: the URL is embedded in a card that may stay open a while.
+        return async_sign_path(hass, proxied, timedelta(days=2))
+    except Exception:  # noqa: BLE001 — unsigned still works same-origin on the LAN
+        return proxied
 
 
-def _rewrite_card(card):
+def _rewrite_card(hass, card):
     """Proxy image_url + each plant photo_url in a card dict, in place."""
     if not isinstance(card, dict):
         return card
     if card.get("image_url"):
-        card["image_url"] = _proxy_media(card["image_url"])
+        card["image_url"] = _proxy_media(hass, card["image_url"])
     for p in card.get("plants") or []:
         if isinstance(p, dict) and p.get("photo_url"):
-            p["photo_url"] = _proxy_media(p["photo_url"])
+            p["photo_url"] = _proxy_media(hass, p["photo_url"])
     return card
 
 # Short server-side cache so opening/reloading the panel is fast even after a
@@ -238,11 +251,11 @@ class VerdiGrowCardsView(HomeAssistantView):
         try:
             if request.query.get("plant"):
                 return self.json(_rewrite_card(
-                    await rt["client"].async_plant_card(request.query["plant"])))
+                    self.hass, await rt["client"].async_plant_card(request.query["plant"])))
             if request.query.get("id"):
                 return self.json(_rewrite_card(
-                    await rt["client"].async_card(request.query["id"])))
-            return self.json({"cards": [_rewrite_card(c)
+                    self.hass, await rt["client"].async_card(request.query["id"])))
+            return self.json({"cards": [_rewrite_card(self.hass, c)
                                         for c in await rt["client"].async_cards()]})
         except Exception as e:  # noqa: BLE001
             return self.json({"error": str(e)}, status_code=502)
