@@ -17,7 +17,8 @@ from pathlib import Path
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr_helper
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -38,6 +39,52 @@ _LOGGER = logging.getLogger(__name__)
 # Containers become HA devices with sensor + image entities on their area.
 PLATFORMS: list[str] = ["sensor", "image"]
 _UNAVAILABLE = ("unknown", "unavailable", "", None)
+
+
+async def _async_register_card_resource(hass: HomeAssistant, base_url: str,
+                                        version: str | None) -> None:
+    """Register the VerdiGrow card as a Lovelace *resource* — the documented way
+    to ship a custom card from an integration (storage mode). The resource list
+    is part of the Lovelace config every frontend fetches, including the Companion
+    app, so the card loads like any HACS card. Version-stamps the URL and updates
+    the existing resource on upgrade (cache-bust). Falls back to add_extra_js_url
+    in YAML mode, where resources can't be added programmatically."""
+    stamped = f"{base_url}?v={version}" if version else base_url
+
+    def _fallback() -> None:
+        from homeassistant.components.frontend import add_extra_js_url
+        add_extra_js_url(hass, stamped)
+
+    async def _register(_event=None) -> None:
+        lovelace = hass.data.get("lovelace")
+        resources = getattr(lovelace, "resources", None)
+        if resources is None or getattr(lovelace, "mode", None) != "storage":
+            _fallback()  # YAML mode / lovelace absent — best effort
+            return
+        try:
+            if not getattr(resources, "loaded", False):
+                await resources.async_load()
+            existing = next(
+                (r for r in resources.async_items()
+                 if str(r.get("url", "")).split("?")[0] == base_url), None)
+            if existing is None:
+                await resources.async_create_item(
+                    {"res_type": "module", "url": stamped})
+                _LOGGER.info("Registered VerdiGrow card resource %s", stamped)
+            elif existing.get("url") != stamped:
+                await resources.async_update_item(
+                    existing["id"], {"res_type": "module", "url": stamped})
+                _LOGGER.info("Updated VerdiGrow card resource to %s", stamped)
+        except Exception:  # noqa: BLE001 — never block setup on the card
+            _LOGGER.exception("Could not register VerdiGrow card resource; "
+                              "falling back to extra_js_url")
+            _fallback()
+
+    # Lovelace resources aren't ready until HA has started.
+    if hass.state == CoreState.running:
+        await _register()
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -161,16 +208,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Version-stamp the static URLs so a new release busts the browser AND the
         # Companion-app WebView cache (which otherwise serves a stale card/panel).
         try:
-            integration = await hass.async_add_executor_job(
+            manifest = await hass.async_add_executor_job(
                 lambda: __import__("json").loads(
                     (Path(__file__).parent / "manifest.json").read_text()))
-            ver = integration.get("version")
+            ver = manifest.get("version")
         except Exception:  # noqa: BLE001 — cache-bust is best-effort
             ver = None
         stamp = f"?v={ver}" if ver else ""
-        # Load the custom Lovelace card so `custom:verdigrow-container-card` works.
-        from homeassistant.components.frontend import add_extra_js_url
-        add_extra_js_url(hass, f"{STATIC_URL}/verdigrow-card.js{stamp}")
+        # Make `custom:verdigrow-container-card` available to dashboards. The
+        # DOCUMENTED way to ship a card from an integration is to register it as a
+        # Lovelace *resource* (res_type module) — the resource list is part of the
+        # Lovelace config the frontend (incl. the Companion app) fetches, so the
+        # card loads the same way HACS-installed cards do. add_extra_js_url only
+        # injects it into the browser's main frontend and the app's Lovelace engine
+        # doesn't reliably pick it up ("custom element doesn't exist").
+        await _async_register_card_resource(
+            hass, f"{STATIC_URL}/verdigrow-card.js", ver)
         await panel_custom.async_register_panel(
             hass,
             frontend_url_path=PANEL_URL,
@@ -211,4 +264,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if hass.data.get(DOMAIN, {}).pop("_panel", False):
             from homeassistant.components import frontend
             frontend.async_remove_panel(hass, PANEL_URL)
+            await _async_remove_card_resource(hass)
     return unloaded
+
+
+async def _async_remove_card_resource(hass: HomeAssistant) -> None:
+    """Drop the Lovelace card resource on full uninstall (storage mode)."""
+    lovelace = hass.data.get("lovelace")
+    resources = getattr(lovelace, "resources", None)
+    if resources is None or getattr(lovelace, "mode", None) != "storage":
+        return
+    try:
+        if not getattr(resources, "loaded", False):
+            await resources.async_load()
+        for r in list(resources.async_items()):
+            if str(r.get("url", "")).split("?")[0] == f"{STATIC_URL}/verdigrow-card.js":
+                await resources.async_delete_item(r["id"])
+    except Exception:  # noqa: BLE001 — best effort on teardown
+        _LOGGER.exception("Could not remove VerdiGrow card resource")
