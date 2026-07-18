@@ -41,6 +41,18 @@ PLATFORMS: list[str] = ["sensor", "image"]
 _UNAVAILABLE = ("unknown", "unavailable", "", None)
 
 
+def _lovelace_resources(hass: HomeAssistant):
+    """The Lovelace resource collection, tolerant of HA storing the lovelace data
+    as a dataclass (current) or a dict (older). Returns the collection only if it
+    supports programmatic add (storage mode); None otherwise (YAML mode)."""
+    data = hass.data.get("lovelace")
+    resources = data.get("resources") if isinstance(data, dict) else getattr(data, "resources", None)
+    # ResourceStorageCollection can add/update/delete; ResourceYAMLCollection can't.
+    if resources is not None and hasattr(resources, "async_create_item"):
+        return resources
+    return None
+
+
 async def _async_register_card_resource(hass: HomeAssistant, base_url: str,
                                         version: str | None) -> None:
     """Register the VerdiGrow card as a Lovelace *resource* — the documented way
@@ -48,21 +60,23 @@ async def _async_register_card_resource(hass: HomeAssistant, base_url: str,
     is part of the Lovelace config every frontend fetches, including the Companion
     app, so the card loads like any HACS card. Version-stamps the URL and updates
     the existing resource on upgrade (cache-bust). Falls back to add_extra_js_url
-    in YAML mode, where resources can't be added programmatically."""
+    only if there's no storage resource collection (YAML mode)."""
     stamped = f"{base_url}?v={version}" if version else base_url
 
     def _fallback() -> None:
         from homeassistant.components.frontend import add_extra_js_url
         add_extra_js_url(hass, stamped)
+        _LOGGER.warning("VerdiGrow: Lovelace not in storage mode — loaded the card "
+                        "via extra_js_url (may not appear in the Companion app). "
+                        "Add %s as a dashboard resource manually if needed.", stamped)
 
     async def _register(_event=None) -> None:
-        lovelace = hass.data.get("lovelace")
-        resources = getattr(lovelace, "resources", None)
-        if resources is None or getattr(lovelace, "mode", None) != "storage":
+        resources = _lovelace_resources(hass)
+        if resources is None:
             _fallback()  # YAML mode / lovelace absent — best effort
             return
         try:
-            if not getattr(resources, "loaded", False):
+            if not getattr(resources, "loaded", True):
                 await resources.async_load()
             existing = next(
                 (r for r in resources.async_items()
@@ -70,11 +84,13 @@ async def _async_register_card_resource(hass: HomeAssistant, base_url: str,
             if existing is None:
                 await resources.async_create_item(
                     {"res_type": "module", "url": stamped})
-                _LOGGER.info("Registered VerdiGrow card resource %s", stamped)
+                _LOGGER.info("Registered VerdiGrow card Lovelace resource %s", stamped)
             elif existing.get("url") != stamped:
                 await resources.async_update_item(
                     existing["id"], {"res_type": "module", "url": stamped})
-                _LOGGER.info("Updated VerdiGrow card resource to %s", stamped)
+                _LOGGER.info("Updated VerdiGrow card Lovelace resource to %s", stamped)
+            else:
+                _LOGGER.debug("VerdiGrow card Lovelace resource already current")
         except Exception:  # noqa: BLE001 — never block setup on the card
             _LOGGER.exception("Could not register VerdiGrow card resource; "
                               "falling back to extra_js_url")
@@ -270,12 +286,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_remove_card_resource(hass: HomeAssistant) -> None:
     """Drop the Lovelace card resource on full uninstall (storage mode)."""
-    lovelace = hass.data.get("lovelace")
-    resources = getattr(lovelace, "resources", None)
-    if resources is None or getattr(lovelace, "mode", None) != "storage":
+    resources = _lovelace_resources(hass)
+    if resources is None:
         return
     try:
-        if not getattr(resources, "loaded", False):
+        if not getattr(resources, "loaded", True):
             await resources.async_load()
         for r in list(resources.async_items()):
             if str(r.get("url", "")).split("?")[0] == f"{STATIC_URL}/verdigrow-card.js":

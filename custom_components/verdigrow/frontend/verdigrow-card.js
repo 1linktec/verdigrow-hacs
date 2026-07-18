@@ -147,14 +147,19 @@ class VerdiGrowCard extends HTMLElement {
   static getConfigElement() { return document.createElement("verdigrow-card-editor"); }
 }
 
-customElements.define("verdigrow-container-card", VerdiGrowCard);
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "verdigrow-container-card",
-  name: "VerdiGrow",
-  description: "A VerdiGrow container or plant: photo, planting chart, plants, metrics.",
-  preview: false,
-});
+// Guard against double-definition: the module can be loaded more than once (a
+// leftover extra_js_url plus the Lovelace resource, or a cache-busted second URL).
+// Defining a custom element twice throws, which would break the whole card.
+if (!customElements.get("verdigrow-container-card")) {
+  customElements.define("verdigrow-container-card", VerdiGrowCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "verdigrow-container-card",
+    name: "VerdiGrow",
+    description: "A VerdiGrow container or plant: photo, planting chart, plants, metrics.",
+    preview: false,
+  });
+}
 
 
 // ── Visual editor: pick an area, then a container or plant ──────────────────
@@ -239,4 +244,6 @@ class VerdiGrowCardEditor extends HTMLElement {
     });
   }
 }
-customElements.define("verdigrow-card-editor", VerdiGrowCardEditor);
+if (!customElements.get("verdigrow-card-editor")) {
+  customElements.define("verdigrow-card-editor", VerdiGrowCardEditor);
+}
