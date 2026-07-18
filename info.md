@@ -1,3 +1,5 @@
+![VerdiGrow — Track. Grow. Thrive.](https://raw.githubusercontent.com/1linktec/verdigrow-hacs/main/assets/verdigrow.png)
+
 Surfaces your VerdiGrow containers into Home Assistant as native entities — the
 plants growing in each container, latest metrics, and the latest photo — plus a
 rich custom Lovelace card for any container or plant.

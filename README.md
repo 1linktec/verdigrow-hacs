@@ -1,5 +1,10 @@
 # VerdiGrow — Home Assistant integration
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/1linktec/verdigrow-hacs/main/assets/verdigrow.png"
+       alt="VerdiGrow — Track. Grow. Thrive." width="640">
+</p>
+
 Connects [VerdiGrow](https://github.com/1linktec/verdigrow), the self-hosted
 grower's record system, to Home Assistant. **HA stays the sensor hub and renders
 the dashboards; VerdiGrow stores the grow records.** The integration:
