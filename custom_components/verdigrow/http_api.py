@@ -12,13 +12,43 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from urllib.parse import quote, urlsplit
 
+from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers import area_registry as ar
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# Photos live on VerdiGrow (possibly http / an internal IP / the cloud). Loading
+# them straight from the card breaks in the Companion app (mixed content + an
+# unreachable host), so rewrite every image URL to load through HA same-origin.
+_MEDIA_PROXY = "/api/verdigrow/photo"
+_IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif")
+
+
+def _proxy_media(url):
+    """Rewrite a VerdiGrow photo URL to the HA same-origin proxy (keeps only the
+    path, so scheme/host/mixed-content stop mattering)."""
+    if not url:
+        return url
+    parts = urlsplit(url)
+    path = parts.path + (("?" + parts.query) if parts.query else "")
+    return f"{_MEDIA_PROXY}?p={quote(path, safe='')}"
+
+
+def _rewrite_card(card):
+    """Proxy image_url + each plant photo_url in a card dict, in place."""
+    if not isinstance(card, dict):
+        return card
+    if card.get("image_url"):
+        card["image_url"] = _proxy_media(card["image_url"])
+    for p in card.get("plants") or []:
+        if isinstance(p, dict) and p.get("photo_url"):
+            p["photo_url"] = _proxy_media(p["photo_url"])
+    return card
 
 # Short server-side cache so opening/reloading the panel is fast even after a
 # full page reload (bypass/refresh with ?fresh=1).
@@ -207,12 +237,43 @@ class VerdiGrowCardsView(HomeAssistantView):
             return self.json({"error": "VerdiGrow not set up"}, status_code=503)
         try:
             if request.query.get("plant"):
-                return self.json(await rt["client"].async_plant_card(request.query["plant"]))
+                return self.json(_rewrite_card(
+                    await rt["client"].async_plant_card(request.query["plant"])))
             if request.query.get("id"):
-                return self.json(await rt["client"].async_card(request.query["id"]))
-            return self.json({"cards": await rt["client"].async_cards()})
+                return self.json(_rewrite_card(
+                    await rt["client"].async_card(request.query["id"])))
+            return self.json({"cards": [_rewrite_card(c)
+                                        for c in await rt["client"].async_cards()]})
         except Exception as e:  # noqa: BLE001
             return self.json({"error": str(e)}, status_code=502)
+
+
+class VerdiGrowPhotoView(HomeAssistantView):
+    """Same-origin photo proxy: fetch a VerdiGrow media file server-side and serve
+    it from HA, so the card's <img> works in the Companion app (no mixed content,
+    no unreachable internal host). Restricted to image paths to avoid proxying
+    arbitrary token-authed endpoints."""
+
+    url = "/api/verdigrow/photo"
+    name = "api:verdigrow:photo"
+    requires_auth = True
+
+    def __init__(self, hass):
+        self.hass = hass
+
+    async def get(self, request):
+        rt = _runtime(self.hass)
+        if not rt:
+            return web.Response(status=503)
+        path = request.query.get("p") or ""
+        base = path.split("?")[0].lower()
+        if not path.startswith("/") or not base.endswith(_IMG_EXTS):
+            return web.Response(status=400)
+        data, ctype = await rt["client"].async_fetch_media(path)
+        if data is None:
+            return web.Response(status=404)
+        return web.Response(body=data, content_type=ctype,
+                            headers={"Cache-Control": "max-age=3600"})
 
 
 class VerdiGrowPushView(HomeAssistantView):

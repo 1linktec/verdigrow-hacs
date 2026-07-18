@@ -92,6 +92,20 @@ class VerdiGrowClient:
     async def async_plant_card(self, pk) -> dict:
         return await self._get(f"{API_CARDS}plant/{pk}/")
 
+    async def async_fetch_media(self, path: str) -> tuple[bytes | None, str | None]:
+        """Fetch a media file (photo) from VerdiGrow by its path, so HA can proxy
+        it same-origin (avoids mixed-content + unreachable-host in the app).
+        Returns (bytes, content_type) or (None, None) on any failure."""
+        try:
+            async with self._session.get(self._url + path, headers=self._headers,
+                                         timeout=aiohttp.ClientTimeout(total=20)) as r:
+                if r.status != 200:
+                    return None, None
+                return (await r.read(),
+                        r.headers.get("Content-Type", "application/octet-stream"))
+        except Exception:  # noqa: BLE001 — image is best-effort
+            return None, None
+
     async def async_push(self, readings: list[dict]) -> dict:
         """POST a batch of readings. Each: {metric, value, occurred_at?, entity_id?,
         and one of container_id | container_public_id | area_id | area}."""
