@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (API_AREAS, API_AREAS_DELETE, API_AREAS_IMPORT, API_CARDS,
-                    API_CONTAINERS, API_DEVICE_USAGE, API_DEVICES,
+                    API_CONTAINERS, API_DEVICE_MAP, API_DEVICE_USAGE, API_DEVICES,
                     API_METRIC_TYPES, API_PING, API_PLANTS, API_READINGS)
 
 _LOGGER = logging.getLogger(__name__)
@@ -124,6 +124,20 @@ class VerdiGrowClient:
         """Devices to track for running-cost — each with its HA entity links,
         accuracy tier and area."""
         return (await self._get(API_DEVICES)).get("devices", [])
+
+    async def async_devices_all(self) -> list[dict]:
+        """Every VerdiGrow device (for the panel's device-mapping UI)."""
+        return (await self._get(API_DEVICES + "?all=1")).get("devices", [])
+
+    async def async_device_map(self, payload: dict) -> dict:
+        """Link an HA entity to a device, or create a device (action: link|create)."""
+        try:
+            async with self._session.post(self._url + API_DEVICE_MAP, json=payload,
+                                          headers=self._headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
+                r.raise_for_status()
+                return await r.json()
+        except Exception as e:
+            raise VerdiGrowError(str(e)) from e
 
     async def async_push_device_usage(self, usage: list[dict]) -> dict:
         """POST accumulated device usage deltas. Each item:

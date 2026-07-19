@@ -289,6 +289,38 @@ class VerdiGrowPhotoView(HomeAssistantView):
                             headers={"Cache-Control": "max-age=3600"})
 
 
+class VerdiGrowDevicesView(HomeAssistantView):
+    """Device mapping. GET → all VerdiGrow devices (full info). POST → link an HA
+    entity to a device, or create a device (proxied to VerdiGrow)."""
+
+    url = "/api/verdigrow/devices"
+    name = "api:verdigrow:devices"
+    requires_auth = True
+
+    def __init__(self, hass):
+        self.hass = hass
+
+    async def get(self, request):
+        rt = _runtime(self.hass)
+        if not rt:
+            return self.json({"error": "VerdiGrow not set up"}, status_code=503)
+        try:
+            return self.json({"devices": await rt["client"].async_devices_all()})
+        except Exception as e:  # noqa: BLE001
+            return self.json({"error": str(e)}, status_code=502)
+
+    async def post(self, request):
+        rt = _runtime(self.hass)
+        if not rt:
+            return self.json({"error": "VerdiGrow not set up"}, status_code=503)
+        try:
+            body = await request.json()
+            result = await rt["client"].async_device_map(body)
+            return self.json(result)
+        except Exception as e:  # noqa: BLE001
+            return self.json({"error": str(e)}, status_code=502)
+
+
 class VerdiGrowPushView(HomeAssistantView):
     """POST /api/verdigrow/push — push the current map now (for testing)."""
 

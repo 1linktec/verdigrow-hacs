@@ -37,17 +37,19 @@ class VerdiGrowPanel extends HTMLElement {
     try {
       if (!PANEL_CACHE || force) {
         const q = force ? "?fresh=1" : "";
-        const [catalog, maps, areas] = await Promise.all([
+        const [catalog, maps, areas, devices] = await Promise.all([
           this._hass.callApi("GET", "verdigrow/catalog" + q),
           this._hass.callApi("GET", "verdigrow/mappings"),
           this._hass.callApi("GET", "verdigrow/areas" + q),
+          this._hass.callApi("GET", "verdigrow/devices").catch(() => ({ devices: [] })),
         ]);
         if (catalog.error) throw new Error(catalog.error);
-        PANEL_CACHE = { catalog, maps, areas, at: new Date() };
+        PANEL_CACHE = { catalog, maps, areas, devices, at: new Date() };
       }
       const d = PANEL_CACHE;
       this._catalog = d.catalog;
       this._areas = d.areas || { ha_areas: [], vg_areas: [], area_map: {} };
+      this._vgDevices = (d.devices && d.devices.devices) || [];
       this._cacheAt = d.at;
       this._links = {}; // "target|id|metric" -> entity_id
       this._excludes = {}; // "areaId|metric" -> Set(container ids) manually excluded from ambient
@@ -73,8 +75,19 @@ class VerdiGrowPanel extends HTMLElement {
     const ent = h.entities || {}, dev = h.devices || {}, areas = h.areas || {};
     this._haAreas = areas;
     const byArea = {}, all = [], classes = new Set();
+    const switches = [], energy = [];   // device candidates
     Object.keys(h.states || {}).forEach((eid) => {
       const domain = eid.split(".")[0];
+      const e0 = ent[eid] || {};
+      let aid0 = e0.area_id;
+      if (!aid0 && e0.device_id && dev[e0.device_id]) aid0 = dev[e0.device_id].area_id;
+      aid0 = aid0 || "";
+      const st0 = h.states[eid];
+      const attrs0 = (st0 && st0.attributes) || {};
+      const cand = { entity_id: eid, name: attrs0.friendly_name || eid, area_id: aid0 };
+      if (domain === "switch" || domain === "light") switches.push(cand);
+      else if (domain === "sensor" && ["energy", "power"].includes(attrs0.device_class)) energy.push(cand);
+
       if (!SENSOR_DOMAINS.includes(domain)) return;
       const e = ent[eid] || {};
       let aid = e.area_id;
@@ -97,9 +110,12 @@ class VerdiGrowPanel extends HTMLElement {
       (byArea[aid] = byArea[aid] || []).push(item);
     });
     all.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    const byName = (a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase());
     this._haAll = all;
     this._haByArea = byArea;
     this._deviceClasses = Array.from(classes).sort();
+    this._haSwitches = switches.sort(byName);
+    this._haEnergy = energy.sort(byName);
   }
 
   _entitiesFor(areaId) {
@@ -327,6 +343,126 @@ class VerdiGrowPanel extends HTMLElement {
     } catch (e) { if (st) st.textContent = "Error: " + (e.message || e); }
   }
 
+  // ── Devices — map HA switches / energy sensors to VerdiGrow devices ─────────
+  _vgArea(vgAreaId) {
+    // VG area id → HA area id, via the stored VG→HA area map.
+    const m = (this._areas && this._areas.area_map) || {};
+    return m[vgAreaId] || m[String(vgAreaId)] || "";
+  }
+
+  _suggestEntity(dev, list) {
+    // Name+area match for an empty field (auto-map like the metric match).
+    const nm = (dev.name || "").toLowerCase();
+    if (!nm) return "";
+    const haArea = this._vgArea(dev.area_id);
+    const scope = haArea ? list.filter((x) => x.area_id === haArea) : list;
+    const hit = scope.find((x) => x.name.toLowerCase() === nm)
+      || scope.find((x) => x.name.toLowerCase().includes(nm) || nm.includes(x.name.toLowerCase()));
+    return hit ? hit.entity_id : "";
+  }
+
+  _devicesHtml() {
+    const devices = this._vgDevices || [];
+    const areaName = {};
+    (this._catalog.areas || []).forEach((a) => { areaName[a.id] = a.name; });
+    const linked = new Set();
+    devices.forEach((d) => {
+      (d.ha_switch_entities || []).forEach((e) => linked.add(e));
+      (d.ha_energy_entities || []).forEach((e) => linked.add(e));
+    });
+    const swOpts = (this._haSwitches || []).map((s) => `<option value="${esc(s.entity_id)}">${esc(s.name)}</option>`).join("");
+    const enOpts = (this._haEnergy || []).map((s) => `<option value="${esc(s.entity_id)}">${esc(s.name)}</option>`).join("");
+
+    const rows = devices.map((d) => {
+      const sw = (d.ha_switch_entities || []).join(", ");
+      const en = (d.ha_energy_entities || []).join(", ");
+      const swSug = sw ? "" : this._suggestEntity(d, this._haSwitches || []);
+      const enSug = en ? "" : this._suggestEntity(d, this._haEnergy || []);
+      const where = d.area_id && areaName[d.area_id] ? " · " + esc(areaName[d.area_id]) : "";
+      return `<div class="vg-drow" data-device="${d.id}">
+        <div style="min-width:190px"><b>${esc(d.name)}</b> <span class="vg-dim">${esc(d.kind)}${where}</span></div>
+        <input class="vg-pick vg-dsw" list="vg-sw-list" value="${esc(sw || swSug)}" placeholder="on/off switch(es)…">
+        <input class="vg-pick vg-den" list="vg-en-list" value="${esc(en || enSug)}" placeholder="energy sensor…">
+      </div>`;
+    }).join("") || '<p class="vg-dim">No VerdiGrow devices yet — create some from HA entities below, or in VerdiGrow → Settings → Devices.</p>';
+
+    const unSw = (this._haSwitches || []).filter((s) => !linked.has(s.entity_id));
+    const unEn = (this._haEnergy || []).filter((s) => !linked.has(s.entity_id));
+    const createRow = (e, type) => `<div class="vg-row">
+      <span class="vg-metric">${esc(e.name)} <span class="vg-dim">${esc(e.entity_id)}</span></span>
+      <button class="vg-btn secondary vg-dcreate" data-entity="${esc(e.entity_id)}" data-name="${esc(e.name)}"
+              data-type="${type}" data-area="${esc(e.area_id || "")}" type="button">＋ Add as device</button></div>`;
+    const createHtml = (unSw.length || unEn.length)
+      ? `<details class="vg-node" style="margin-top:10px">
+           <summary>＋ Create devices from HA entities (${unSw.length + unEn.length})</summary>
+           <div class="vg-body">
+             ${unSw.slice(0, 60).map((e) => createRow(e, "switch")).join("")}
+             ${unEn.slice(0, 60).map((e) => createRow(e, "energy")).join("")}
+           </div></details>`
+      : "";
+
+    return `<details class="vg-node">
+      <summary>🔌 Devices — ${devices.length} · map HA switches / energy for running cost</summary>
+      <div class="vg-body">
+        <datalist id="vg-sw-list">${swOpts}</datalist>
+        <datalist id="vg-en-list">${enOpts}</datalist>
+        <p class="vg-dim">Pick the on/off switch (runtime) or energy sensor (kWh) for each device.
+          Name+area matches are pre-filled — review &amp; save. Comma-separate multiple switches
+          (e.g. grow-light fixtures). Manual-only devices can be left blank.</p>
+        ${rows}
+        ${devices.length ? `<button class="vg-btn" id="vg-dev-save" type="button" style="margin-top:8px">Save device mappings</button>` : ""}
+        <span id="vg-dev-status" class="vg-status"></span>
+        ${createHtml}
+      </div></details>`;
+  }
+
+  async _reloadDevices() {
+    const d = await this._hass.callApi("GET", "verdigrow/devices");
+    this._vgDevices = d.devices || [];
+    if (PANEL_CACHE) PANEL_CACHE.devices = d;
+  }
+
+  async _saveDevices() {
+    const st = this.querySelector("#vg-dev-status");
+    if (st) st.textContent = "Saving…";
+    try {
+      for (const row of this.querySelectorAll(".vg-drow")) {
+        await this._hass.callApi("POST", "verdigrow/devices", {
+          action: "link", device_id: Number(row.dataset.device),
+          ha_switch_entity: row.querySelector(".vg-dsw").value.trim(),
+          ha_energy_entity: row.querySelector(".vg-den").value.trim(),
+        });
+      }
+      await this._reloadDevices();
+      if (st) st.textContent = "Saved.";
+      this._render();
+    } catch (e) { if (st) st.textContent = "Error: " + (e.message || e); }
+  }
+
+  async _createDevice(btn) {
+    const st = this.querySelector("#vg-dev-status");
+    if (st) st.textContent = "Creating…";
+    const vgArea = this._vgAreaFromHa(btn.dataset.area);
+    const payload = { action: "create", name: btn.dataset.name, energy: "electric",
+                      kind: btn.dataset.type === "switch" ? "other" : "other" };
+    if (vgArea) payload.area_id = vgArea;
+    if (btn.dataset.type === "switch") payload.ha_switch_entity = btn.dataset.entity;
+    else payload.ha_energy_entity = btn.dataset.entity;
+    try {
+      await this._hass.callApi("POST", "verdigrow/devices", payload);
+      await this._reloadDevices();
+      this._render();
+    } catch (e) { if (st) st.textContent = "Error: " + (e.message || e); }
+  }
+
+  _vgAreaFromHa(haAreaId) {
+    // HA area id → VG area id (reverse of the VG→HA area map).
+    if (!haAreaId) return null;
+    const m = (this._areas && this._areas.area_map) || {};
+    for (const vg in m) { if (m[vg] === haAreaId) return Number(vg); }
+    return null;
+  }
+
   _render() {
     const c = this._catalog;
     const containersByArea = {};
@@ -389,6 +525,8 @@ class VerdiGrowPanel extends HTMLElement {
         .vg-node summary{cursor:pointer}
         .vg-body{padding:6px 0 6px 14px}
         .vg-row{display:flex;gap:10px;align-items:center;margin:4px 0;flex-wrap:wrap}
+        .vg-drow{display:flex;gap:10px;align-items:center;margin:6px 0;flex-wrap:wrap}
+        .vg-drow .vg-pick{min-width:200px}
         .vg-metric{min-width:190px}.vg-metric em{color:var(--secondary-text-color)}
         .vg-dim{color:var(--secondary-text-color);font-weight:400}
         .vg-pick{flex:1;min-width:240px;max-width:420px;padding:6px;border-radius:6px;
@@ -425,6 +563,7 @@ class VerdiGrowPanel extends HTMLElement {
           HA sensors to VerdiGrow metrics. Your containers &amp; plants appear as cards on their
           HA <strong>area</strong> dashboards (native entities), not here.</p>
         ${this._areaSyncHtml()}
+        ${this._devicesHtml()}
         <h2 style="margin:18px 0 4px">Sensor mapping</h2>
         <p class="vg-help">Filter by HA area to cut the sensor list, expand a container (or an
           area), and pick a sensor for each metric. A sensor on a <strong>container</strong>
@@ -485,6 +624,10 @@ class VerdiGrowPanel extends HTMLElement {
     if (sm) sm.addEventListener("click", () => this._saveAreaMap());
     this.querySelectorAll(".vg-area-del").forEach((b) =>
       b.addEventListener("click", () => this._removeArea(b.dataset.id, b.dataset.name)));
+    const devSave = this.querySelector("#vg-dev-save");
+    if (devSave) devSave.addEventListener("click", () => this._saveDevices());
+    this.querySelectorAll(".vg-dcreate").forEach((b) =>
+      b.addEventListener("click", () => this._createDevice(b)));
     this._updateStatus();
   }
 
