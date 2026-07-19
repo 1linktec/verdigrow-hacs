@@ -294,8 +294,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except VerdiGrowError as e:
             _LOGGER.warning("VerdiGrow: could not fetch devices: %s", e)
             return
-        dev["by_switch"] = {d["ha_switch_entity"]: d["id"] for d in devices if d.get("ha_switch_entity")}
-        dev["by_energy"] = {d["ha_energy_entity"]: d["id"] for d in devices if d.get("ha_energy_entity")}
+        # A device may list several switch/energy entities (e.g. a grow light with
+        # multiple fixtures) — map each entity to the device so their runtime/energy
+        # sums onto it.
+        dev["by_switch"], dev["by_energy"] = {}, {}
+        for d in devices:
+            ents = d.get("ha_switch_entities") or ([d["ha_switch_entity"]] if d.get("ha_switch_entity") else [])
+            for e in ents:
+                dev["by_switch"][e] = d["id"]
+            ents = d.get("ha_energy_entities") or ([d["ha_energy_entity"]] if d.get("ha_energy_entity") else [])
+            for e in ents:
+                dev["by_energy"][e] = d["id"]
         now = dt_util.utcnow()
         for ent in dev["by_switch"]:
             st = hass.states.get(ent)
