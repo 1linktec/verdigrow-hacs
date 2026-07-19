@@ -18,6 +18,7 @@ class VerdiGrowPanel extends HTMLElement {
     super();
     this._loaded = false;
     this._filterArea = "";
+    this._filterType = "";
     this._search = "";
   }
 
@@ -71,20 +72,26 @@ class VerdiGrowPanel extends HTMLElement {
     const h = this._hass;
     const ent = h.entities || {}, dev = h.devices || {}, areas = h.areas || {};
     this._haAreas = areas;
-    const byArea = {}, all = [];
+    const byArea = {}, all = [], classes = new Set();
     Object.keys(h.states || {}).forEach((eid) => {
-      if (!SENSOR_DOMAINS.includes(eid.split(".")[0])) return;
+      const domain = eid.split(".")[0];
+      if (!SENSOR_DOMAINS.includes(domain)) return;
       const e = ent[eid] || {};
       let aid = e.area_id;
       if (!aid && e.device_id && dev[e.device_id]) aid = dev[e.device_id].area_id;
       aid = aid || "";
       const st = h.states[eid];
+      const attrs = (st && st.attributes) || {};
+      const dc = attrs.device_class || "";
+      if (dc) classes.add(dc);
       const item = {
         entity_id: eid,
-        name: (st.attributes && st.attributes.friendly_name) || eid,
+        name: attrs.friendly_name || eid,
         state: st.state,
-        unit: (st.attributes && st.attributes.unit_of_measurement) || "",
+        unit: attrs.unit_of_measurement || "",
         area_id: aid,
+        domain: domain,
+        device_class: dc,
       };
       all.push(item);
       (byArea[aid] = byArea[aid] || []).push(item);
@@ -92,10 +99,14 @@ class VerdiGrowPanel extends HTMLElement {
     all.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     this._haAll = all;
     this._haByArea = byArea;
+    this._deviceClasses = Array.from(classes).sort();
   }
 
   _entitiesFor(areaId) {
     let list = areaId ? (this._haByArea[areaId] || []) : this._haAll;
+    const t = this._filterType || "";
+    if (t.startsWith("dc:")) { const dc = t.slice(3); list = list.filter((e) => e.device_class === dc); }
+    else if (t.startsWith("dom:")) { const d = t.slice(4); list = list.filter((e) => e.domain === d); }
     const term = this._search.toLowerCase();
     if (term) list = list.filter((e) =>
       (e.entity_id + " " + e.name).toLowerCase().includes(term));
@@ -107,8 +118,9 @@ class VerdiGrowPanel extends HTMLElement {
       const current = this._links[`${target}|${id}|${m.key}`] || "";
       return `<div class="vg-row">
         <span class="vg-metric">${esc(m.name)} <em>(${esc(m.unit)})</em></span>
-        <select class="vg-pick" data-target="${target}" data-id="${id}"
-                data-metric="${esc(m.key)}" data-current="${esc(current)}"></select>
+        <input class="vg-pick" list="vg-ent-list" placeholder="type to search a sensor…"
+               data-target="${target}" data-id="${id}"
+               data-metric="${esc(m.key)}" data-current="${esc(current)}" value="${esc(current)}">
       </div>`;
     }).join("");
   }
@@ -137,8 +149,9 @@ class VerdiGrowPanel extends HTMLElement {
         : `<span class="vg-dim">no containers in this area yet</span>`;
       return `<div class="vg-row vg-arow">
         <span class="vg-metric">${esc(m.name)} <em>(${esc(m.unit)})</em></span>
-        <select class="vg-pick" data-target="area" data-id="${area.id}"
-                data-metric="${esc(m.key)}" data-current="${esc(current)}"></select>
+        <input class="vg-pick" list="vg-ent-list" placeholder="type to search a sensor…"
+               data-target="area" data-id="${area.id}"
+               data-metric="${esc(m.key)}" data-current="${esc(current)}" value="${esc(current)}">
         ${exclUI}
       </div>`;
     }).join("");
@@ -355,6 +368,13 @@ class VerdiGrowPanel extends HTMLElement {
       .map((a) => `<option value="${esc(a.area_id)}">${esc(a.name)} (${this._haByArea[a.area_id].length})</option>`)
       .join("");
 
+    const typeOptions =
+      `<optgroup label="Measurement">` +
+      (this._deviceClasses || []).map((dc) => `<option value="dc:${esc(dc)}">${esc(dc)}</option>`).join("") +
+      `</optgroup><optgroup label="Domain">` +
+      SENSOR_DOMAINS.map((d) => `<option value="dom:${d}">${d}</option>`).join("") +
+      `</optgroup>`;
+
     this.innerHTML = `
       <style>
         .vg-wrap{padding:16px;max-width:900px;margin:0 auto;color:var(--primary-text-color)}
@@ -411,9 +431,12 @@ class VerdiGrowPanel extends HTMLElement {
           (bed, row, pot, bucket, tray) is <em>dedicated</em>. A sensor on an <strong>area</strong>
           is <em>ambient</em> — the area stores nothing; the reading is recorded on every container
           currently in that area. Stored in Home Assistant; readings are pushed to VerdiGrow.</p>
+        <datalist id="vg-ent-list"></datalist>
         <div class="vg-bar">
-          <label>HA area</label>
-          <select id="vg-filter"><option value="">All HA areas</option>${areaOptions}</select>
+          <label>Area</label>
+          <select id="vg-filter"><option value="">All areas</option>${areaOptions}</select>
+          <label>Type</label>
+          <select id="vg-type"><option value="">All types</option>${typeOptions}</select>
           <input id="vg-search" placeholder="filter sensors…">
           <button class="vg-btn secondary" id="vg-expand" type="button">Expand all</button>
           <button class="vg-btn secondary" id="vg-collapse" type="button">Collapse all</button>
@@ -427,26 +450,32 @@ class VerdiGrowPanel extends HTMLElement {
       </div>`;
 
     this._filterEl = this.querySelector("#vg-filter");
+    this._typeEl = this.querySelector("#vg-type");
     this._searchEl = this.querySelector("#vg-search");
     this._statusEl = this.querySelector("#vg-status");
-    this._selects = [];  // grows as node bodies are built on expand
+    this._datalist = this.querySelector("#vg-ent-list");
+    this._selects = [];  // .vg-pick comboboxes, grows as node bodies are built
     this._filterEl.value = this._filterArea;
+    this._typeEl.value = this._filterType;
     this._searchEl.value = this._search;
+    this._fillDatalist();
 
     this._filterEl.addEventListener("change", () => { this._filterArea = this._filterEl.value; this._refill(); });
+    this._typeEl.addEventListener("change", () => { this._filterType = this._typeEl.value; this._refill(); });
     this._searchEl.addEventListener("input", () => { this._search = this._searchEl.value; this._refill(); });
     this.querySelector("#vg-save").addEventListener("click", () => this._save());
     this.querySelector("#vg-pushnow").addEventListener("click", () => this._pushNow());
     this.querySelector("#vg-expand").addEventListener("click", () => {
       this.querySelectorAll("details.vg-node").forEach((d) => { d.open = true; this._buildNodeBody(d); });
-      this._fillVisible();
+      this._updateStatus();
     });
     this.querySelector("#vg-collapse").addEventListener("click", () =>
       this.querySelectorAll("details.vg-node").forEach((d) => { d.open = false; }));
-    // Lazy: build a node's rows AND fill its selects only when it opens —
-    // building all 137 nodes' rows + ~685 selects up front froze the page.
+    // Lazy: build a node's rows only when it opens — building all nodes' rows up
+    // front froze the page. Pickers are comboboxes sharing one <datalist>, so
+    // there's no per-row option-fill to do.
     this.addEventListener("toggle", (e) => {
-      if (e.target && e.target.open) { this._buildNodeBody(e.target); this._fillVisible(); }
+      if (e.target && e.target.open) this._buildNodeBody(e.target);
     }, true);
     const rf = this.querySelector("#vg-refresh");
     if (rf) rf.addEventListener("click", () => this._refresh());
@@ -484,7 +513,7 @@ class VerdiGrowPanel extends HTMLElement {
     }
     body.innerHTML = html;
     delete body.dataset.lazy;
-    // Track new selects in this body (for filtering + fill), wire change.
+    // Track pickers; remember the chosen value (so _gather can read it).
     Array.from(body.querySelectorAll(".vg-pick")).forEach((s) => {
       if (!this._selects.includes(s)) {
         s.addEventListener("change", () => { s.dataset.current = s.value; });
@@ -496,41 +525,29 @@ class VerdiGrowPanel extends HTMLElement {
   _updateStatus() {
     if (!this._statusEl) return;
     const n = this._entitiesFor(this._filterArea).length;
+    const bits = [];
+    if (this._filterArea) bits.push("this area");
+    if (this._filterType) bits.push(this._filterType.replace(/^dc:|^dom:/, ""));
     this._statusEl.textContent = `${n} sensor${n === 1 ? "" : "s"}`
-      + (this._filterArea ? " in this HA area" : " (all areas)") + " · expand a row to map";
+      + (bits.length ? " · " + bits.join(" · ") : " (all)") + " · type in a row to pick";
   }
 
-  _fillSelect(sel, list) {
-    const current = sel.dataset.current || "";
-    const opts = ['<option value="">— none —</option>'];
-    let hasCurrent = !current;
-    list.forEach((e) => {
-      if (e.entity_id === current) hasCurrent = true;
-      const label = `${e.name} · ${e.entity_id}` + (e.state != null ? ` = ${e.state}${e.unit}` : "");
-      opts.push(`<option value="${e.entity_id}">${label}</option>`);
-    });
-    if (current && !hasCurrent) opts.push(`<option value="${current}">${current} (outside filter)</option>`);
-    sel.innerHTML = opts.join("");
-    sel.value = current;
-    sel._filled = true;
-    sel._filledKey = this._filterArea + "|" + this._search;
-  }
-
-  _fillVisible() {
+  // One shared <datalist> that every combobox picker reads from — filtered by
+  // area + type + search. Type-ahead in each row filters this list natively, so
+  // there's never a 1600-option scroll.
+  _fillDatalist() {
+    if (!this._datalist) return;
     const list = this._entitiesFor(this._filterArea);
-    const key = this._filterArea + "|" + this._search;
+    this._datalist.innerHTML = list.map((e) => {
+      const val = e.state != null && e.state !== "" ? ` = ${e.state}${e.unit}` : "";
+      return `<option value="${esc(e.entity_id)}">${esc(e.name)}${esc(val)}</option>`;
+    }).join("");
     this._updateStatus();
-    for (const sel of this._selects) {
-      if (sel.offsetParent === null) continue;      // hidden (collapsed) — skip
-      if (sel._filled && sel._filledKey === key) continue;
-      this._fillSelect(sel, list);
-    }
   }
 
   _refill() {
-    // Filter/search changed — mark everything stale, refill only what's visible.
-    this._selects.forEach((s) => { s._filled = false; });
-    this._fillVisible();
+    // Area / type / search changed — rebuild the shared datalist.
+    this._fillDatalist();
   }
 
   _gather() {
@@ -546,11 +563,14 @@ class VerdiGrowPanel extends HTMLElement {
       }
       byKey[k] = link;
     }
+    const valid = new Set(this._haAll.map((e) => e.entity_id));
     this._selects.forEach((s) => {
       const key = `${s.dataset.target}|${s.dataset.id}|${s.dataset.metric}`;
-      if (!s.value) { delete byKey[key]; return; }
+      const v = (s.value || "").trim();
+      if (!v) { delete byKey[key]; return; }
+      if (!valid.has(v)) return;  // ignore free-typed text that isn't an entity
       const link = { target: s.dataset.target, id: Number(s.dataset.id),
-                     metric: s.dataset.metric, entity_id: s.value };
+                     metric: s.dataset.metric, entity_id: v };
       if (s.dataset.target === "area") {
         link.exclude = Array.from(this.querySelectorAll(
           `.vg-excl[data-area="${s.dataset.id}"][data-metric="${s.dataset.metric}"]`))
