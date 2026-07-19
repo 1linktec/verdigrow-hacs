@@ -20,7 +20,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr_helper
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import (async_track_state_change_event,
+                                         async_track_time_interval)
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -253,14 +254,112 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.data[DOMAIN]["_panel"] = True
 
-    unsub = async_track_time_interval(hass, _push, timedelta(seconds=interval))
-    hass.data[DOMAIN][entry.entry_id] = {"unsub": unsub, "coordinator": coordinator}
+    # ── Device running-cost tracking ───────────────────────────────────────
+    # Track VerdiGrow devices' HA entities and push usage: metered → energy-sensor
+    # kWh deltas; estimated → on/off switch runtime. Switch OFF transitions push
+    # immediately (regardless of the metric interval), so short runs aren't missed.
+    dev = {"by_switch": {}, "by_energy": {}, "switch_on": {}, "energy_last": {},
+           "unsub_switch": None}
+
+    def _num(entity_id):
+        st = hass.states.get(entity_id or "")
+        if st is None or st.state in _UNAVAILABLE:
+            return None
+        try:
+            return float(st.state)
+        except (TypeError, ValueError):
+            return None
+
+    @callback
+    def _on_switch_change(event):
+        ent = event.data.get("entity_id")
+        new = event.data.get("new_state")
+        if new is None:
+            return
+        now = dt_util.utcnow()
+        if new.state == "on":
+            dev["switch_on"].setdefault(ent, now)
+            return
+        started = dev["switch_on"].pop(ent, None)
+        device_id = dev["by_switch"].get(ent)
+        if started and device_id:
+            hours = (now - started).total_seconds() / 3600
+            if hours > 0:
+                hass.async_create_task(client.async_push_device_usage(
+                    [{"device_id": device_id, "add_runtime_hours": round(hours, 4)}]))
+
+    async def _refresh_devices():
+        try:
+            devices = await client.async_devices()
+        except VerdiGrowError as e:
+            _LOGGER.warning("VerdiGrow: could not fetch devices: %s", e)
+            return
+        dev["by_switch"] = {d["ha_switch_entity"]: d["id"] for d in devices if d.get("ha_switch_entity")}
+        dev["by_energy"] = {d["ha_energy_entity"]: d["id"] for d in devices if d.get("ha_energy_entity")}
+        now = dt_util.utcnow()
+        for ent in dev["by_switch"]:
+            st = hass.states.get(ent)
+            if st and st.state == "on":
+                dev["switch_on"].setdefault(ent, now)
+        for ent in dev["by_energy"]:
+            if ent not in dev["energy_last"]:
+                v = _num(ent)
+                if v is not None:
+                    dev["energy_last"][ent] = v
+        if dev["unsub_switch"]:
+            dev["unsub_switch"]()
+            dev["unsub_switch"] = None
+        if dev["by_switch"]:
+            dev["unsub_switch"] = async_track_state_change_event(
+                hass, list(dev["by_switch"]), _on_switch_change)
+
+    async def _flush_devices():
+        now = dt_util.utcnow()
+        usage = []
+        # Credit currently-on switches for elapsed time, then restart their clock.
+        for ent, device_id in dev["by_switch"].items():
+            started = dev["switch_on"].get(ent)
+            if started:
+                hours = (now - started).total_seconds() / 3600
+                if hours > 0:
+                    usage.append({"device_id": device_id, "add_runtime_hours": round(hours, 4)})
+                    dev["switch_on"][ent] = now
+        # Energy-sensor consumption deltas (ignore counter resets / non-numerics).
+        for ent, device_id in dev["by_energy"].items():
+            v = _num(ent)
+            if v is None:
+                continue
+            last = dev["energy_last"].get(ent)
+            dev["energy_last"][ent] = v
+            if last is not None and v > last:
+                usage.append({"device_id": device_id, "add_kwh": round(v - last, 4)})
+        if usage:
+            try:
+                await client.async_push_device_usage(usage)
+            except VerdiGrowError as e:
+                _LOGGER.warning("VerdiGrow device-usage push failed: %s", e)
+
+    async def _interval(now=None):
+        await _push(now)
+        await _refresh_devices()  # pick up newly added/edited devices
+        await _flush_devices()
+
+    unsub = async_track_time_interval(hass, _interval, timedelta(seconds=interval))
+    hass.data[DOMAIN][entry.entry_id] = {"unsub": unsub, "coordinator": coordinator,
+                                         "dev": dev}
+    entry.async_on_unload(lambda: dev["unsub_switch"] and dev["unsub_switch"]())
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _manage_devices()  # prune any devices for containers already gone
 
     entry.async_on_unload(entry.add_update_listener(_reload_on_options))
     hass.async_create_task(_push())
+    # Start device tracking once HA is up (entity states exist).
+    if hass.state == CoreState.running:
+        hass.async_create_task(_refresh_devices())
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED,
+                                   lambda _e: hass.async_create_task(_refresh_devices()))
     return True
 
 

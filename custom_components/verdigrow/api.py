@@ -9,8 +9,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (API_AREAS, API_AREAS_DELETE, API_AREAS_IMPORT, API_CARDS,
-                    API_CONTAINERS, API_METRIC_TYPES, API_PING, API_PLANTS,
-                    API_READINGS)
+                    API_CONTAINERS, API_DEVICE_USAGE, API_DEVICES,
+                    API_METRIC_TYPES, API_PING, API_PLANTS, API_READINGS)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,6 +114,25 @@ class VerdiGrowClient:
         try:
             async with self._session.post(self._url + API_READINGS,
                                           json={"readings": readings},
+                                          headers=self._headers, timeout=aiohttp.ClientTimeout(total=30)) as r:
+                r.raise_for_status()
+                return await r.json()
+        except Exception as e:
+            raise VerdiGrowError(str(e)) from e
+
+    async def async_devices(self) -> list[dict]:
+        """Devices to track for running-cost — each with its HA entity links,
+        accuracy tier and area."""
+        return (await self._get(API_DEVICES)).get("devices", [])
+
+    async def async_push_device_usage(self, usage: list[dict]) -> dict:
+        """POST accumulated device usage deltas. Each item:
+        {device_id, add_kwh?, add_runtime_hours?}."""
+        if not usage:
+            return {"updated": 0}
+        try:
+            async with self._session.post(self._url + API_DEVICE_USAGE,
+                                          json={"usage": usage},
                                           headers=self._headers, timeout=aiohttp.ClientTimeout(total=30)) as r:
                 r.raise_for_status()
                 return await r.json()
