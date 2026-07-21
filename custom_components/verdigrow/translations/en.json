@@ -22,12 +22,19 @@
   "options": {
     "step": {
       "init": {
-        "title": "VerdiGrow — update frequency",
-        "description": "Map your HA sensors to VerdiGrow metrics in the VerdiGrow panel (in the HA sidebar). This integration pushes those readings on the interval below. Default is once an hour — don't set it too low or you'll flood the database.",
+        "title": "VerdiGrow — connection & update frequency",
+        "description": "Edit the connection here without removing the integration. Change the URL/token if your VerdiGrow moved (e.g. LAN → cloud). Readings are pushed on the interval below (default hourly — don't set it too low or you'll flood the database). Map sensors to metrics in the VerdiGrow panel.",
         "data": {
+          "url": "VerdiGrow URL",
+          "token": "API token",
+          "verify_ssl": "Verify SSL certificate (uncheck for self-signed / untrusted proxy certs)",
           "update_interval": "Seconds between pushes"
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Could not connect: {detail}",
+      "invalid_auth": "Token rejected: {detail}"
     }
   }
 }

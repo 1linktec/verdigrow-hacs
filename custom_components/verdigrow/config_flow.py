@@ -63,13 +63,39 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
         self._options = dict(entry.options)
 
     async def async_step_init(self, user_input=None):
+        errors = {}
+        detail = ""
+        data = {**self.entry.data}
         if user_input is not None:
-            self._options[CONF_INTERVAL] = user_input[CONF_INTERVAL]
-            return self.async_create_entry(title="", data=self._options)
+            # Validate the (possibly changed) endpoint before saving.
+            client = VerdiGrowClient(self.hass, user_input[CONF_URL], user_input[CONF_TOKEN],
+                                     user_input.get(CONF_VERIFY_SSL, True))
+            try:
+                await client.async_ping()
+            except VerdiGrowError as e:
+                detail = str(e)
+                _LOGGER.warning("VerdiGrow reconnect failed: %s", detail)
+                errors["base"] = "invalid_auth" if "unauthorized" in detail else "cannot_connect"
+            else:
+                # Persist the connection (URL/token/verify-SSL) to entry.data; the
+                # entry update listener (_reload_on_options) reloads to apply it.
+                self.hass.config_entries.async_update_entry(self.entry, data={
+                    CONF_URL: user_input[CONF_URL],
+                    CONF_TOKEN: user_input[CONF_TOKEN],
+                    CONF_VERIFY_SSL: user_input.get(CONF_VERIFY_SSL, True),
+                })
+                self._options[CONF_INTERVAL] = user_input[CONF_INTERVAL]
+                return self.async_create_entry(title="", data=self._options)
+        # Endpoint fields default to the current values so you edit in place — no
+        # need to delete + re-add the integration to change the URL or token.
         schema = vol.Schema({
+            vol.Required(CONF_URL, default=data.get(CONF_URL, "")): str,
+            vol.Required(CONF_TOKEN, default=data.get(CONF_TOKEN, "")): str,
+            vol.Required(CONF_VERIFY_SSL, default=data.get(CONF_VERIFY_SSL, True)): bool,
             vol.Required(CONF_INTERVAL,
                          default=self._options.get(CONF_INTERVAL, DEFAULT_INTERVAL)):
                 selector.NumberSelector(selector.NumberSelectorConfig(
                     min=60, max=86400, step=60, unit_of_measurement="seconds", mode="box")),
         })
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors,
+                                    description_placeholders={"detail": detail})
