@@ -88,4 +88,7 @@ and latest metrics.
 
 ## License
 
-[AGPL-3.0](LICENSE) © 2026 Jeff Hope
+[MIT](LICENSE) © 2026 Onelink Technologies Inc.
+
+This Home Assistant integration is open source and free to use. The VerdiGrow
+platform it connects to is a separate, proprietary product.
