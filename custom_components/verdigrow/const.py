@@ -8,8 +8,8 @@ CONF_TOKEN = "token"
 CONF_VERIFY_SSL = "verify_ssl"
 
 # Options
-CONF_INTERVAL = "update_interval"      # seconds between pushes
-DEFAULT_INTERVAL = 3600                # once per hour (don't flood the DB)
+CONF_INTERVAL = "update_interval"  # seconds between pushes
+DEFAULT_INTERVAL = 3600  # once per hour (don't flood the DB)
 
 # Mapping target kinds (stored in HA; VerdiGrow only receives the resolved key)
 TARGET_CONTAINER = "container"

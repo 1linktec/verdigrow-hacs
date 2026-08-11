@@ -1,0 +1,20 @@
+# Matched to Home Assistant core's own style so the integration reads like an
+# integration, not like a Django app that wandered in.
+target-version = "py313"
+line-length = 88
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    # HA's own codebase carries these; enforcing them here would mean fighting the
+    # framework's idioms rather than following them.
+    "B008",    # function call in argument defaults — HA does this constantly
+    "RUF012",  # mutable class attrs need ClassVar — noisy on HA entity classes
+    # "Tomato×3" is correct typography in text a grower reads. The rule is about
+    # confusable IDENTIFIERS; applying it to display strings would make the UI worse.
+    "RUF001",
+]
+
+[lint.isort]
+force-sort-within-sections = true
+known-first-party = ["custom_components"]

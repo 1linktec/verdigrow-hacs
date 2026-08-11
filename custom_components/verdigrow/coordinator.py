@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import timedelta
+import logging
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -17,7 +17,9 @@ class VerdiGrowCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass, client, interval):
         super().__init__(
-            hass, _LOGGER, name="VerdiGrow containers",
+            hass,
+            _LOGGER,
+            name="VerdiGrow containers",
             update_interval=timedelta(seconds=max(300, int(interval))),
         )
         self.client = client

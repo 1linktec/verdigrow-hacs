@@ -10,9 +10,13 @@ from .entity import VGContainerEntity
 
 # Map VerdiGrow metric keys to HA device classes where they line up.
 _DEVICE_CLASS = {
-    "air_temp": "temperature", "soil_temp": "temperature",
-    "humidity": "humidity", "soil_moisture": "moisture",
-    "light": "illuminance", "ec": None, "ph": None,
+    "air_temp": "temperature",
+    "soil_temp": "temperature",
+    "humidity": "humidity",
+    "soil_moisture": "moisture",
+    "light": "illuminance",
+    "ec": None,
+    "ph": None,
 }
 
 
@@ -34,7 +38,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 key = (cid, m["key"])
                 if key not in known_metric:
                     known_metric.add(key)
-                    new.append(VGMetricSensor(coordinator, cid, m["key"], m["name"], m["unit"]))
+                    new.append(
+                        VGMetricSensor(coordinator, cid, m["key"], m["name"], m["unit"])
+                    )
         if new:
             async_add_entities(new)
 
@@ -62,9 +68,15 @@ class VGPlantsSensor(VGContainerEntity, SensorEntity):
         rows = []
         for o in card.get("occupancy", []):
             if o.get("plants"):
-                rows.append(f"{o['label']}: " + ", ".join(
-                    f"{p['variety']}×{p['count']}" if p['count'] > 1 else p['variety']
-                    for p in o["plants"]))
+                rows.append(
+                    f"{o['label']}: "
+                    + ", ".join(
+                        f"{p['variety']}×{p['count']}"
+                        if p["count"] > 1
+                        else p["variety"]
+                        for p in o["plants"]
+                    )
+                )
         plants = card.get("plants", [])
         latest_note = next((p["note"] for p in plants if p.get("note")), "")
         return {
@@ -85,7 +97,7 @@ class VGMetricSensor(VGContainerEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_container_{cid}_metric_{key}"
         self._attr_name = name
         self._attr_native_unit_of_measurement = unit or None
-        if key in _DEVICE_CLASS and _DEVICE_CLASS[key]:
+        if _DEVICE_CLASS.get(key):
             self._attr_device_class = _DEVICE_CLASS[key]
 
     @property

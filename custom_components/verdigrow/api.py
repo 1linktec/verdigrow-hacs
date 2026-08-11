@@ -8,9 +8,20 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import (API_AREAS, API_AREAS_DELETE, API_AREAS_IMPORT, API_CARDS,
-                    API_CONTAINERS, API_DEVICE_MAP, API_DEVICE_USAGE, API_DEVICES,
-                    API_METRIC_TYPES, API_PING, API_PLANTS, API_READINGS)
+from .const import (
+    API_AREAS,
+    API_AREAS_DELETE,
+    API_AREAS_IMPORT,
+    API_CARDS,
+    API_CONTAINERS,
+    API_DEVICE_MAP,
+    API_DEVICE_USAGE,
+    API_DEVICES,
+    API_METRIC_TYPES,
+    API_PING,
+    API_PLANTS,
+    API_READINGS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,8 +31,9 @@ class VerdiGrowError(Exception):
 
 
 class VerdiGrowClient:
-    def __init__(self, hass: HomeAssistant, url: str, token: str,
-                 verify_ssl: bool = True) -> None:
+    def __init__(
+        self, hass: HomeAssistant, url: str, token: str, verify_ssl: bool = True
+    ) -> None:
         # verify_ssl=False → a session that skips cert verification (self-signed
         # / internal-CA proxies that HA doesn't trust).
         self._session = async_get_clientsession(hass, verify_ssl=verify_ssl)
@@ -30,8 +42,11 @@ class VerdiGrowClient:
 
     async def _get(self, path: str) -> dict:
         try:
-            async with self._session.get(self._url + path, headers=self._headers,
-                                         timeout=aiohttp.ClientTimeout(total=15)) as r:
+            async with self._session.get(
+                self._url + path,
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as r:
                 if r.status == 401:
                     raise VerdiGrowError("unauthorized (check the API token)")
                 r.raise_for_status()
@@ -58,8 +73,11 @@ class VerdiGrowClient:
         """Create VerdiGrow areas from HA area names (idempotent, matched by name)."""
         try:
             async with self._session.post(
-                self._url + API_AREAS_IMPORT, json={"names": names},
-                headers=self._headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
+                self._url + API_AREAS_IMPORT,
+                json={"names": names},
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as r:
                 r.raise_for_status()
                 return await r.json()
         except Exception as e:
@@ -71,11 +89,14 @@ class VerdiGrowClient:
         NOT an exception, so the panel can show the reason."""
         try:
             async with self._session.post(
-                self._url + API_AREAS_DELETE, json={"id": area_id},
-                headers=self._headers, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                self._url + API_AREAS_DELETE,
+                json={"id": area_id},
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as r:
                 try:
                     return await r.json()
-                except Exception:  # noqa: BLE001 — non-JSON body
+                except Exception:
                     return {"error": f"HTTP {r.status}"}
         except Exception as e:
             raise VerdiGrowError(str(e)) from e
@@ -97,13 +118,18 @@ class VerdiGrowClient:
         it same-origin (avoids mixed-content + unreachable-host in the app).
         Returns (bytes, content_type) or (None, None) on any failure."""
         try:
-            async with self._session.get(self._url + path, headers=self._headers,
-                                         timeout=aiohttp.ClientTimeout(total=20)) as r:
+            async with self._session.get(
+                self._url + path,
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as r:
                 if r.status != 200:
                     return None, None
-                return (await r.read(),
-                        r.headers.get("Content-Type", "application/octet-stream"))
-        except Exception:  # noqa: BLE001 — image is best-effort
+                return (
+                    await r.read(),
+                    r.headers.get("Content-Type", "application/octet-stream"),
+                )
+        except Exception:
             return None, None
 
     async def async_push(self, readings: list[dict]) -> dict:
@@ -112,9 +138,12 @@ class VerdiGrowClient:
         if not readings:
             return {"written": 0}
         try:
-            async with self._session.post(self._url + API_READINGS,
-                                          json={"readings": readings},
-                                          headers=self._headers, timeout=aiohttp.ClientTimeout(total=30)) as r:
+            async with self._session.post(
+                self._url + API_READINGS,
+                json={"readings": readings},
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as r:
                 r.raise_for_status()
                 return await r.json()
         except Exception as e:
@@ -132,8 +161,12 @@ class VerdiGrowClient:
     async def async_device_map(self, payload: dict) -> dict:
         """Link an HA entity to a device, or create a device (action: link|create)."""
         try:
-            async with self._session.post(self._url + API_DEVICE_MAP, json=payload,
-                                          headers=self._headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
+            async with self._session.post(
+                self._url + API_DEVICE_MAP,
+                json=payload,
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as r:
                 r.raise_for_status()
                 return await r.json()
         except Exception as e:
@@ -145,9 +178,12 @@ class VerdiGrowClient:
         if not usage:
             return {"updated": 0}
         try:
-            async with self._session.post(self._url + API_DEVICE_USAGE,
-                                          json={"usage": usage},
-                                          headers=self._headers, timeout=aiohttp.ClientTimeout(total=30)) as r:
+            async with self._session.post(
+                self._url + API_DEVICE_USAGE,
+                json={"usage": usage},
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as r:
                 r.raise_for_status()
                 return await r.json()
         except Exception as e:

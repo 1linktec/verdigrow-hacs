@@ -10,8 +10,8 @@ it is not an extension of HA. No hardware access; no dashboards rendered here.
 
 from __future__ import annotations
 
-import logging
 from datetime import timedelta
+import logging
 from pathlib import Path
 
 from homeassistant.components import panel_custom
@@ -20,21 +20,40 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr_helper
-from homeassistant.helpers.event import (async_track_state_change_event,
-                                         async_track_time_interval)
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .api import VerdiGrowClient, VerdiGrowError
-from .const import (CONF_INTERVAL, CONF_TOKEN, CONF_URL, CONF_VERIFY_SSL,
-                    DEFAULT_INTERVAL, DOMAIN, PANEL_ICON, PANEL_TITLE, PANEL_URL,
-                    STATIC_URL, STORAGE_KEY, STORAGE_VERSION,
-                    TARGET_AREA, TARGET_CONTAINER)
+from .const import (
+    CONF_INTERVAL,
+    CONF_TOKEN,
+    CONF_URL,
+    CONF_VERIFY_SSL,
+    DEFAULT_INTERVAL,
+    DOMAIN,
+    PANEL_ICON,
+    PANEL_TITLE,
+    PANEL_URL,
+    STATIC_URL,
+    STORAGE_KEY,
+    STORAGE_VERSION,
+    TARGET_AREA,
+    TARGET_CONTAINER,
+)
 from .coordinator import VerdiGrowCoordinator
-from .http_api import (VerdiGrowAreasView, VerdiGrowCardsView,
-                       VerdiGrowCatalogView, VerdiGrowDevicesView,
-                       VerdiGrowMappingsView, VerdiGrowPhotoView,
-                       VerdiGrowPushView)
+from .http_api import (
+    VerdiGrowAreasView,
+    VerdiGrowCardsView,
+    VerdiGrowCatalogView,
+    VerdiGrowDevicesView,
+    VerdiGrowMappingsView,
+    VerdiGrowPhotoView,
+    VerdiGrowPushView,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,15 +67,20 @@ def _lovelace_resources(hass: HomeAssistant):
     as a dataclass (current) or a dict (older). Returns the collection only if it
     supports programmatic add (storage mode); None otherwise (YAML mode)."""
     data = hass.data.get("lovelace")
-    resources = data.get("resources") if isinstance(data, dict) else getattr(data, "resources", None)
+    resources = (
+        data.get("resources")
+        if isinstance(data, dict)
+        else getattr(data, "resources", None)
+    )
     # ResourceStorageCollection can add/update/delete; ResourceYAMLCollection can't.
     if resources is not None and hasattr(resources, "async_create_item"):
         return resources
     return None
 
 
-async def _async_register_card_resource(hass: HomeAssistant, base_url: str,
-                                        version: str | None) -> None:
+async def _async_register_card_resource(
+    hass: HomeAssistant, base_url: str, version: str | None
+) -> None:
     """Register the VerdiGrow card as a Lovelace *resource* — the documented way
     to ship a custom card from an integration (storage mode). The resource list
     is part of the Lovelace config every frontend fetches, including the Companion
@@ -67,10 +91,14 @@ async def _async_register_card_resource(hass: HomeAssistant, base_url: str,
 
     def _fallback() -> None:
         from homeassistant.components.frontend import add_extra_js_url
+
         add_extra_js_url(hass, stamped)
-        _LOGGER.warning("VerdiGrow: Lovelace not in storage mode — loaded the card "
-                        "via extra_js_url (may not appear in the Companion app). "
-                        "Add %s as a dashboard resource manually if needed.", stamped)
+        _LOGGER.warning(
+            "VerdiGrow: Lovelace not in storage mode — loaded the card "
+            "via extra_js_url (may not appear in the Companion app). "
+            "Add %s as a dashboard resource manually if needed.",
+            stamped,
+        )
 
     async def _register(_event=None) -> None:
         resources = _lovelace_resources(hass)
@@ -81,21 +109,30 @@ async def _async_register_card_resource(hass: HomeAssistant, base_url: str,
             if not getattr(resources, "loaded", True):
                 await resources.async_load()
             existing = next(
-                (r for r in resources.async_items()
-                 if str(r.get("url", "")).split("?")[0] == base_url), None)
+                (
+                    r
+                    for r in resources.async_items()
+                    if str(r.get("url", "")).split("?")[0] == base_url
+                ),
+                None,
+            )
             if existing is None:
                 await resources.async_create_item(
-                    {"res_type": "module", "url": stamped})
+                    {"res_type": "module", "url": stamped}
+                )
                 _LOGGER.info("Registered VerdiGrow card Lovelace resource %s", stamped)
             elif existing.get("url") != stamped:
                 await resources.async_update_item(
-                    existing["id"], {"res_type": "module", "url": stamped})
+                    existing["id"], {"res_type": "module", "url": stamped}
+                )
                 _LOGGER.info("Updated VerdiGrow card Lovelace resource to %s", stamped)
             else:
                 _LOGGER.debug("VerdiGrow card Lovelace resource already current")
-        except Exception:  # noqa: BLE001 — never block setup on the card
-            _LOGGER.exception("Could not register VerdiGrow card resource; "
-                              "falling back to extra_js_url")
+        except Exception:
+            _LOGGER.exception(
+                "Could not register VerdiGrow card resource; "
+                "falling back to extra_js_url"
+            )
             _fallback()
 
     # Lovelace resources aren't ready until HA has started.
@@ -106,8 +143,12 @@ async def _async_register_card_resource(hass: HomeAssistant, base_url: str,
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    client = VerdiGrowClient(hass, entry.data[CONF_URL], entry.data[CONF_TOKEN],
-                             entry.data.get(CONF_VERIFY_SSL, True))
+    client = VerdiGrowClient(
+        hass,
+        entry.data[CONF_URL],
+        entry.data[CONF_TOKEN],
+        entry.data.get(CONF_VERIFY_SSL, True),
+    )
     store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
     hass.data.setdefault(DOMAIN, {})
 
@@ -129,19 +170,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Which (container, metric) pairs have a DEDICATED sensor. Ambient
         # (area) sensors are skipped for those pairs — a container's own sensor
         # for a metric wins over the area's ambient sensor for that same metric.
-        dedicated = {(l["id"], l["metric"]) for l in links
-                     if l.get("target") == TARGET_CONTAINER}
+        dedicated = {
+            (link["id"], link["metric"])
+            for link in links
+            if link.get("target") == TARGET_CONTAINER
+        }
 
         # Area -> its current container ids, for ambient fan-out (done here in HA
         # so the dedicated-overrides-ambient rule can be applied per metric).
         area_containers = {}
-        if any(l.get("target") == TARGET_AREA for l in links):
+        if any(link.get("target") == TARGET_AREA for link in links):
             try:
                 for c in await client.async_containers():
                     if c.get("area_id"):
                         area_containers.setdefault(c["area_id"], []).append(c["id"])
             except VerdiGrowError as e:
-                _LOGGER.warning("VerdiGrow: could not fetch containers for ambient fan-out: %s", e)
+                _LOGGER.warning(
+                    "VerdiGrow: could not fetch containers for ambient fan-out: %s", e
+                )
 
         now = dt_util.utcnow().isoformat()
         readings = []
@@ -149,8 +195,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             value = _value(m.get("entity_id"))
             if value is None:
                 continue
-            base = {"metric": m["metric"], "value": value,
-                    "occurred_at": now, "entity_id": m["entity_id"]}
+            base = {
+                "metric": m["metric"],
+                "value": value,
+                "occurred_at": now,
+                "entity_id": m["entity_id"],
+            }
             target = m.get("target")
             if target == TARGET_CONTAINER:
                 readings.append({**base, "container_id": m["id"]})
@@ -182,8 +232,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = VerdiGrowCoordinator(hass, client, interval)
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data[DOMAIN]["runtime"] = {"client": client, "store": store, "push": _push,
-                                    "coordinator": coordinator}
+    hass.data[DOMAIN]["runtime"] = {
+        "client": client,
+        "store": store,
+        "push": _push,
+        "coordinator": coordinator,
+    }
 
     @callback
     def _manage_devices():
@@ -204,7 +258,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             card = data.get(cid)
             if card is None:
                 reg.async_remove_device(device.id)  # gone in VerdiGrow → remove
-            elif card.get("label") and device.name != card["label"] and not device.name_by_user:
+            elif (
+                card.get("label")
+                and device.name != card["label"]
+                and not device.name_by_user
+            ):
                 reg.async_update_device(device.id, name=card["label"])  # renamed
 
     entry.async_on_unload(coordinator.async_add_listener(_manage_devices))
@@ -224,15 +282,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.data[DOMAIN].get("_panel"):
         frontend_dir = str(Path(__file__).parent / "frontend")
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(STATIC_URL, frontend_dir, False)])
+            [StaticPathConfig(STATIC_URL, frontend_dir, False)]
+        )
         # Version-stamp the static URLs so a new release busts the browser AND the
         # Companion-app WebView cache (which otherwise serves a stale card/panel).
         try:
             manifest = await hass.async_add_executor_job(
                 lambda: __import__("json").loads(
-                    (Path(__file__).parent / "manifest.json").read_text()))
+                    (Path(__file__).parent / "manifest.json").read_text()
+                )
+            )
             ver = manifest.get("version")
-        except Exception:  # noqa: BLE001 — cache-bust is best-effort
+        except Exception:
             ver = None
         stamp = f"?v={ver}" if ver else ""
         # Make `custom:verdigrow-container-card` available to dashboards. The
@@ -243,7 +304,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # injects it into the browser's main frontend and the app's Lovelace engine
         # doesn't reliably pick it up ("custom element doesn't exist").
         await _async_register_card_resource(
-            hass, f"{STATIC_URL}/verdigrow-card.js", ver)
+            hass, f"{STATIC_URL}/verdigrow-card.js", ver
+        )
         await panel_custom.async_register_panel(
             hass,
             frontend_url_path=PANEL_URL,
@@ -260,8 +322,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Track VerdiGrow devices' HA entities and push usage: metered → energy-sensor
     # kWh deltas; estimated → on/off switch runtime. Switch OFF transitions push
     # immediately (regardless of the metric interval), so short runs aren't missed.
-    dev = {"by_switch": {}, "by_energy": {}, "switch_on": {}, "energy_last": {},
-           "unsub_switch": None}
+    dev = {
+        "by_switch": {},
+        "by_energy": {},
+        "switch_on": {},
+        "energy_last": {},
+        "unsub_switch": None,
+    }
 
     def _num(entity_id):
         st = hass.states.get(entity_id or "")
@@ -287,8 +354,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if started and device_id:
             hours = (now - started).total_seconds() / 3600
             if hours > 0:
-                hass.async_create_task(client.async_push_device_usage(
-                    [{"device_id": device_id, "add_runtime_hours": round(hours, 4)}]))
+                hass.async_create_task(
+                    client.async_push_device_usage(
+                        [{"device_id": device_id, "add_runtime_hours": round(hours, 4)}]
+                    )
+                )
 
     async def _refresh_devices():
         try:
@@ -301,10 +371,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # sums onto it.
         dev["by_switch"], dev["by_energy"] = {}, {}
         for d in devices:
-            ents = d.get("ha_switch_entities") or ([d["ha_switch_entity"]] if d.get("ha_switch_entity") else [])
+            ents = d.get("ha_switch_entities") or (
+                [d["ha_switch_entity"]] if d.get("ha_switch_entity") else []
+            )
             for e in ents:
                 dev["by_switch"][e] = d["id"]
-            ents = d.get("ha_energy_entities") or ([d["ha_energy_entity"]] if d.get("ha_energy_entity") else [])
+            ents = d.get("ha_energy_entities") or (
+                [d["ha_energy_entity"]] if d.get("ha_energy_entity") else []
+            )
             for e in ents:
                 dev["by_energy"][e] = d["id"]
         now = dt_util.utcnow()
@@ -322,7 +396,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             dev["unsub_switch"] = None
         if dev["by_switch"]:
             dev["unsub_switch"] = async_track_state_change_event(
-                hass, list(dev["by_switch"]), _on_switch_change)
+                hass, list(dev["by_switch"]), _on_switch_change
+            )
 
     async def _flush_devices():
         now = dt_util.utcnow()
@@ -333,7 +408,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if started:
                 hours = (now - started).total_seconds() / 3600
                 if hours > 0:
-                    usage.append({"device_id": device_id, "add_runtime_hours": round(hours, 4)})
+                    usage.append(
+                        {"device_id": device_id, "add_runtime_hours": round(hours, 4)}
+                    )
                     dev["switch_on"][ent] = now
         # Energy-sensor consumption deltas (ignore counter resets / non-numerics).
         for ent, device_id in dev["by_energy"].items():
@@ -356,8 +433,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _flush_devices()
 
     unsub = async_track_time_interval(hass, _interval, timedelta(seconds=interval))
-    hass.data[DOMAIN][entry.entry_id] = {"unsub": unsub, "coordinator": coordinator,
-                                         "dev": dev}
+    hass.data[DOMAIN][entry.entry_id] = {
+        "unsub": unsub,
+        "coordinator": coordinator,
+        "dev": dev,
+    }
     entry.async_on_unload(lambda: dev["unsub_switch"] and dev["unsub_switch"]())
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -369,8 +449,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if hass.state == CoreState.running:
         hass.async_create_task(_refresh_devices())
     else:
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED,
-                                   lambda _e: hass.async_create_task(_refresh_devices()))
+        hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED,
+            lambda _e: hass.async_create_task(_refresh_devices()),
+        )
     return True
 
 
@@ -384,12 +466,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if data and data.get("unsub"):
         data["unsub"]()
     # If this was the last entry, tear down the shared panel + runtime.
-    remaining = [k for k in hass.data.get(DOMAIN, {})
-                 if k not in ("_views", "_panel", "runtime")]
+    remaining = [
+        k for k in hass.data.get(DOMAIN, {}) if k not in ("_views", "_panel", "runtime")
+    ]
     if not remaining:
         hass.data.get(DOMAIN, {}).pop("runtime", None)
         if hass.data.get(DOMAIN, {}).pop("_panel", False):
             from homeassistant.components import frontend
+
             frontend.async_remove_panel(hass, PANEL_URL)
             await _async_remove_card_resource(hass)
     return unloaded
@@ -406,5 +490,5 @@ async def _async_remove_card_resource(hass: HomeAssistant) -> None:
         for r in list(resources.async_items()):
             if str(r.get("url", "")).split("?")[0] == f"{STATIC_URL}/verdigrow-card.js":
                 await resources.async_delete_item(r["id"])
-    except Exception:  # noqa: BLE001 — best effort on teardown
+    except Exception:
         _LOGGER.exception("Could not remove VerdiGrow card resource")

@@ -1,0 +1,41 @@
+# The two checks that keep this integration honest against a moving target.
+#
+# Home Assistant changes fast and this repo dates from ~v0.7. Auditing by eye finds
+# today's drift and none of next quarter's — these run on every push and on a schedule,
+# so a deprecation shows up as a red tick rather than as a user's broken install.
+#
+#   hassfest  — Home Assistant's own integration linter: manifest keys and their order,
+#               domain/version sanity, translations, dependencies, iot_class.
+#   HACS      — what HACS itself requires of a repository before it will install it.
+#
+# The weekly run matters more than the push run: nothing here changes for months at a
+# time, and the failures we care about arrive from upstream, not from us.
+name: Validate
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+jobs:
+  hassfest:
+    name: Home Assistant hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # The brands check needs verdigrow to be merged into home-assistant/brands
+          # (BUG_REPORT #16 — the "icon not available" in HA). Ignored so the rest of
+          # the validation is usable until that PR lands; remove this line once it has.
+          ignore: brands

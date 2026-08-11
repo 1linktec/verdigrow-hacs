@@ -10,9 +10,9 @@ VerdiGrow.
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import logging
 import time
-from datetime import timedelta
 from urllib.parse import quote, urlsplit
 
 from aiohttp import web
@@ -48,7 +48,7 @@ def _proxy_media(hass, url):
     try:
         # Long expiry: the URL is embedded in a card that may stay open a while.
         return async_sign_path(hass, proxied, timedelta(days=2))
-    except Exception:  # noqa: BLE001 — unsigned still works same-origin on the LAN
+    except Exception:
         return proxied
 
 
@@ -62,6 +62,7 @@ def _rewrite_card(hass, card):
         if isinstance(p, dict) and p.get("photo_url"):
             p["photo_url"] = _proxy_media(hass, p["photo_url"])
     return card
+
 
 # Short server-side cache so opening/reloading the panel is fast even after a
 # full page reload (bypass/refresh with ?fresh=1).
@@ -110,13 +111,20 @@ class VerdiGrowCatalogView(HomeAssistantView):
         client = rt["client"]
         try:
             containers, areas, plants, metric_types = await asyncio.gather(
-                client.async_containers(), client.async_areas(),
-                client.async_plants(), client.async_metric_types())
-            data = {"containers": containers, "areas": areas,
-                    "plants": plants, "metric_types": metric_types}
+                client.async_containers(),
+                client.async_areas(),
+                client.async_plants(),
+                client.async_metric_types(),
+            )
+            data = {
+                "containers": containers,
+                "areas": areas,
+                "plants": plants,
+                "metric_types": metric_types,
+            }
             _cache_put("catalog", data)
             return self.json(data)
-        except Exception as e:  # noqa: BLE001 — surface to the panel
+        except Exception as e:
             _LOGGER.warning("catalog fetch failed: %s", e)
             return self.json({"error": str(e)}, status_code=502)
 
@@ -170,18 +178,21 @@ class VerdiGrowAreasView(HomeAssistantView):
         if not rt:
             return self.json({"error": "VerdiGrow not set up"}, status_code=503)
         areg = ar.async_get(self.hass)
-        ha = sorted(({"area_id": a.id, "name": a.name} for a in areg.async_list_areas()),
-                    key=lambda x: (x["name"] or "").lower())
+        ha = sorted(
+            ({"area_id": a.id, "name": a.name} for a in areg.async_list_areas()),
+            key=lambda x: (x["name"] or "").lower(),
+        )
         vg = _cache_get("vg_areas") if not request.query.get("fresh") else None
         if vg is None:
             try:
                 vg = await rt["client"].async_areas()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return self.json({"error": str(e)}, status_code=502)
             _cache_put("vg_areas", vg)
         data = await rt["store"].async_load() or {}
-        return self.json({"ha_areas": ha, "vg_areas": vg,
-                          "area_map": data.get("area_map", {})})
+        return self.json(
+            {"ha_areas": ha, "vg_areas": vg, "area_map": data.get("area_map", {})}
+        )
 
     async def post(self, request):
         rt = _runtime(self.hass)
@@ -194,7 +205,7 @@ class VerdiGrowAreasView(HomeAssistantView):
                 result = await rt["client"].async_import_areas(body.get("names", []))
                 _cache_clear("vg_areas", "catalog")  # areas changed
                 return self.json(result)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return self.json({"error": str(e)}, status_code=502)
         if action == "create_ha_areas":
             # Create HA areas for VerdiGrow-owned areas the grower chose to add.
@@ -218,12 +229,15 @@ class VerdiGrowAreasView(HomeAssistantView):
             vg_id = body.get("id")
             try:
                 result = await rt["client"].async_delete_area(vg_id)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return self.json({"error": str(e)}, status_code=502)
             if result.get("ok"):
                 data = await rt["store"].async_load() or {}
                 amap = data.get("area_map") or {}
-                if amap.pop(str(vg_id), None) is not None or amap.pop(vg_id, None) is not None:
+                if (
+                    amap.pop(str(vg_id), None) is not None
+                    or amap.pop(vg_id, None) is not None
+                ):
                     data["area_map"] = amap
                     await rt["store"].async_save(data)
                 _cache_clear("vg_areas", "catalog")
@@ -250,14 +264,27 @@ class VerdiGrowCardsView(HomeAssistantView):
             return self.json({"error": "VerdiGrow not set up"}, status_code=503)
         try:
             if request.query.get("plant"):
-                return self.json(_rewrite_card(
-                    self.hass, await rt["client"].async_plant_card(request.query["plant"])))
+                return self.json(
+                    _rewrite_card(
+                        self.hass,
+                        await rt["client"].async_plant_card(request.query["plant"]),
+                    )
+                )
             if request.query.get("id"):
-                return self.json(_rewrite_card(
-                    self.hass, await rt["client"].async_card(request.query["id"])))
-            return self.json({"cards": [_rewrite_card(self.hass, c)
-                                        for c in await rt["client"].async_cards()]})
-        except Exception as e:  # noqa: BLE001
+                return self.json(
+                    _rewrite_card(
+                        self.hass, await rt["client"].async_card(request.query["id"])
+                    )
+                )
+            return self.json(
+                {
+                    "cards": [
+                        _rewrite_card(self.hass, c)
+                        for c in await rt["client"].async_cards()
+                    ]
+                }
+            )
+        except Exception as e:
             return self.json({"error": str(e)}, status_code=502)
 
 
@@ -285,8 +312,9 @@ class VerdiGrowPhotoView(HomeAssistantView):
         data, ctype = await rt["client"].async_fetch_media(path)
         if data is None:
             return web.Response(status=404)
-        return web.Response(body=data, content_type=ctype,
-                            headers={"Cache-Control": "max-age=3600"})
+        return web.Response(
+            body=data, content_type=ctype, headers={"Cache-Control": "max-age=3600"}
+        )
 
 
 class VerdiGrowDevicesView(HomeAssistantView):
@@ -306,7 +334,7 @@ class VerdiGrowDevicesView(HomeAssistantView):
             return self.json({"error": "VerdiGrow not set up"}, status_code=503)
         try:
             return self.json({"devices": await rt["client"].async_devices_all()})
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return self.json({"error": str(e)}, status_code=502)
 
     async def post(self, request):
@@ -317,7 +345,7 @@ class VerdiGrowDevicesView(HomeAssistantView):
             body = await request.json()
             result = await rt["client"].async_device_map(body)
             return self.json(result)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return self.json({"error": str(e)}, status_code=502)
 
 
