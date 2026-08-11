@@ -7,6 +7,13 @@
 #   hassfest  — Home Assistant's own integration linter: manifest keys and their order,
 #               domain/version sanity, translations, dependencies, iot_class.
 #   HACS      — what HACS itself requires of a repository before it will install it.
+#   import    — does the code actually load against a real Home Assistant.
+#
+# The import job exists because the other two never execute a line of our Python, and
+# neither does ruff. A helper that moved modules, or a generic that isn't subscriptable
+# on the HA version we claim to support, is a clean pass everywhere and an ImportError
+# in the user's log on restart. Importing every module against the pinned floor is the
+# cheapest way to find that here instead of there.
 #
 # The weekly run matters more than the push run: nothing here changes for months at a
 # time, and the failures we care about arrive from upstream, not from us.
@@ -26,6 +33,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
+
+  imports:
+    name: Imports on the minimum HA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Pinned to the floor declared in hacs.json, not to latest. Latest would tell us
+      # the code works on HA today and say nothing about the oldest version we promise
+      # to support — which is the one that breaks for somebody.
+      - run: pip install "homeassistant==2025.6.0"
+      - name: Import every module
+        run: |
+          python - <<'PY'
+          import importlib, pathlib, sys
+          sys.path.insert(0, "custom_components")
+          mods = sorted(p.stem for p in pathlib.Path(
+              "custom_components/verdigrow").glob("*.py") if p.stem != "__init__")
+          failed = []
+          for name in ["verdigrow", *(f"verdigrow.{m}" for m in mods)]:
+              try:
+                  importlib.import_module(name)
+                  print(f"ok   {name}")
+              except Exception as e:
+                  failed.append(f"{name}: {type(e).__name__}: {e}")
+                  print(f"FAIL {name}: {type(e).__name__}: {e}")
+          if failed:
+              sys.exit("\n".join(failed))
+          PY
 
   hacs:
     name: HACS validation

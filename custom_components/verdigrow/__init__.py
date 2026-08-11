@@ -16,7 +16,7 @@ from pathlib import Path
 
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr_helper
@@ -44,7 +44,7 @@ from .const import (
     TARGET_AREA,
     TARGET_CONTAINER,
 )
-from .coordinator import VerdiGrowCoordinator
+from .coordinator import VerdiGrowConfigEntry, VerdiGrowCoordinator, VerdiGrowData
 from .http_api import (
     VerdiGrowAreasView,
     VerdiGrowCardsView,
@@ -143,7 +143,7 @@ async def _async_register_card_resource(
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: VerdiGrowConfigEntry) -> bool:
     client = VerdiGrowClient(
         hass,
         entry.data[CONF_URL],
@@ -232,26 +232,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     interval = int(entry.options.get(CONF_INTERVAL, DEFAULT_INTERVAL))
     coordinator = VerdiGrowCoordinator(hass, client, interval)
     await coordinator.async_config_entry_first_refresh()
-
-    # A SINGLE shared slot, and that is only safe because the integration is declared
-    # `single_config_entry` in manifest.json (Jeff, 2026-08-11: only one Companion will
-    # ever be wired into Home Assistant).
-    #
-    # Without that declaration this is a real bug: every entry overwrites it, and the
-    # sensor-mapping panel reads it — so with two Companions configured, mapping a
-    # sensor would silently write into whichever one happened to load last. The
-    # per-entry data below is keyed by entry_id and the panel/view registration is
-    # guarded, so multi-entry was clearly intended; this one slot was missed.
-    #
-    # If a second Companion is ever supported, this must be keyed by entry_id and the
-    # panel must ask which one it is configuring. Do not simply un-declare
-    # single_config_entry.
-    hass.data[DOMAIN]["runtime"] = {
-        "client": client,
-        "store": store,
-        "push": _push,
-        "coordinator": coordinator,
-    }
 
     @callback
     def _manage_devices():
@@ -446,13 +426,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _refresh_devices()  # pick up newly added/edited devices
         await _flush_devices()
 
-    unsub = async_track_time_interval(hass, _interval, timedelta(seconds=interval))
-    hass.data[DOMAIN][entry.entry_id] = {
-        "unsub": unsub,
-        "coordinator": coordinator,
-        "dev": dev,
-    }
+    entry.async_on_unload(
+        async_track_time_interval(hass, _interval, timedelta(seconds=interval))
+    )
     entry.async_on_unload(lambda: dev["unsub_switch"] and dev["unsub_switch"]())
+
+    # Everything this entry needs at runtime, in one typed place that dies with the
+    # entry. The panel's HTTP views read it back via _entry_data() in http_api.py.
+    #
+    # There is exactly one of these, and that is only safe because the integration
+    # declares `single_config_entry` in manifest.json (Jeff, 2026-08-11: only one
+    # Companion will ever be wired into Home Assistant). The mapping panel is the
+    # reason it matters — it is a global sidebar page with no notion of *which*
+    # Companion it is editing, so with two configured it would write into whichever
+    # one it happened to find. If a second is ever supported, the panel has to ask
+    # first. Do not simply un-declare single_config_entry.
+    entry.runtime_data = VerdiGrowData(
+        client=client, store=store, coordinator=coordinator, push=_push, dev=dev
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _manage_devices()  # prune any devices for containers already gone
@@ -479,22 +470,25 @@ async def _reload_on_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: VerdiGrowConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    if data and data.get("unsub"):
-        data["unsub"]()
-    # If this was the last entry, tear down the shared panel + runtime.
+    # Timers, listeners and the notification poller are all registered with
+    # entry.async_on_unload, so HA tears them down; runtime_data goes with the entry.
+    # Only the genuinely hass-global registrations are left to clean up by hand.
+    #
+    # The sidebar panel and HTTP views are registered once, not per entry, so they
+    # only come down when the LAST entry goes. This entry is still in the registry
+    # while we unload, hence excluding it by id rather than trusting the count.
     remaining = [
-        k for k in hass.data.get(DOMAIN, {}) if k not in ("_views", "_panel", "runtime")
+        e
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.entry_id != entry.entry_id and e.state is ConfigEntryState.LOADED
     ]
-    if not remaining:
-        hass.data.get(DOMAIN, {}).pop("runtime", None)
-        if hass.data.get(DOMAIN, {}).pop("_panel", False):
-            from homeassistant.components import frontend
+    if not remaining and hass.data.get(DOMAIN, {}).pop("_panel", False):
+        from homeassistant.components import frontend
 
-            frontend.async_remove_panel(hass, PANEL_URL)
-            await _async_remove_card_resource(hass)
+        frontend.async_remove_panel(hass, PANEL_URL)
+        await _async_remove_card_resource(hass)
     return unloaded
 
 

@@ -2,14 +2,45 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
+from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import VerdiGrowError
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class VerdiGrowData:
+    """Everything one configured Companion needs at runtime.
+
+    Lives on `entry.runtime_data`, which is the current way to hold this — it is
+    typed, it dies with the entry, and it cannot be read by another integration.
+    The old `hass.data[DOMAIN][entry.entry_id]` dict needed manual cleanup on
+    unload, and a missed key there is a leak nothing complains about.
+    """
+
+    client: Any
+    store: Store
+    coordinator: VerdiGrowCoordinator
+    # Pushes mapped HA sensor states to the Companion. The panel calls it directly
+    # after saving a mapping, so a new sensor shows a value immediately instead of
+    # looking broken until the next interval.
+    push: Callable[[], Awaitable[int]]
+    # Device power/energy tracking state; mutated in place by the tracker.
+    dev: dict = field(default_factory=dict)
+
+
+# A ConfigEntry that carries the above. Annotating with this is what makes
+# `entry.runtime_data.coordinator` resolve in an editor rather than being Any.
+VerdiGrowConfigEntry = ConfigEntry[VerdiGrowData]
 
 
 class VerdiGrowCoordinator(DataUpdateCoordinator):

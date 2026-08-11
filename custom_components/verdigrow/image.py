@@ -7,11 +7,14 @@ from homeassistant.core import callback
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
+from .coordinator import VerdiGrowConfigEntry
 from .entity import VGContainerEntity
 
 
-async def async_setup_entry(hass, entry, async_add_entities):
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+async def async_setup_entry(
+    hass, entry: VerdiGrowConfigEntry, async_add_entities
+) -> None:
+    coordinator = entry.runtime_data.coordinator
     known = set()
 
     @callback

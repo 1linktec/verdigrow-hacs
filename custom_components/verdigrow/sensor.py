@@ -6,6 +6,7 @@ from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.core import callback
 
 from .const import DOMAIN
+from .coordinator import VerdiGrowConfigEntry
 from .entity import VGContainerEntity
 
 # Map VerdiGrow metric keys to HA device classes where they line up.
@@ -20,8 +21,10 @@ _DEVICE_CLASS = {
 }
 
 
-async def async_setup_entry(hass, entry, async_add_entities):
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+async def async_setup_entry(
+    hass, entry: VerdiGrowConfigEntry, async_add_entities
+) -> None:
+    coordinator = entry.runtime_data.coordinator
     known_summary = set()
     known_metric = set()
 

@@ -17,6 +17,7 @@ from urllib.parse import quote, urlsplit
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import area_registry as ar
 
 try:  # HA re-exports it here; fall back to the submodule on older cores
@@ -87,7 +88,16 @@ def _cache_clear(*keys):
 
 
 def _runtime(hass):
-    return hass.data.get(DOMAIN, {}).get("runtime")
+    """The configured Companion's runtime data, or None if it isn't set up.
+
+    The panel is a global sidebar page, not a per-entry one, so it has to go and
+    find the entry. That is well defined only because the integration declares
+    `single_config_entry` — see the note in async_setup_entry.
+    """
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.state is ConfigEntryState.LOADED:
+            return entry.runtime_data
+    return None
 
 
 class VerdiGrowCatalogView(HomeAssistantView):
@@ -108,7 +118,7 @@ class VerdiGrowCatalogView(HomeAssistantView):
             cached = _cache_get("catalog")
             if cached is not None:
                 return self.json(cached)
-        client = rt["client"]
+        client = rt.client
         try:
             containers, areas, plants, metric_types = await asyncio.gather(
                 client.async_containers(),
@@ -143,7 +153,7 @@ class VerdiGrowMappingsView(HomeAssistantView):
         rt = _runtime(self.hass)
         if not rt:
             return self.json({"links": []})
-        data = await rt["store"].async_load() or {"links": []}
+        data = await rt.store.async_load() or {"links": []}
         return self.json(data)
 
     async def post(self, request):
@@ -154,10 +164,10 @@ class VerdiGrowMappingsView(HomeAssistantView):
         links = body.get("links", [])
         if not isinstance(links, list):
             return self.json({"error": "'links' must be a list"}, status_code=400)
-        data = await rt["store"].async_load() or {}
+        data = await rt.store.async_load() or {}
         data["links"] = links  # preserve other keys (e.g. area_map)
-        await rt["store"].async_save(data)
-        await rt["push"]()  # push straight away so it appears without waiting
+        await rt.store.async_save(data)
+        await rt.push()  # push straight away so it appears without waiting
         return self.json({"ok": True, "count": len(links)})
 
 
@@ -185,11 +195,11 @@ class VerdiGrowAreasView(HomeAssistantView):
         vg = _cache_get("vg_areas") if not request.query.get("fresh") else None
         if vg is None:
             try:
-                vg = await rt["client"].async_areas()
+                vg = await rt.client.async_areas()
             except Exception as e:
                 return self.json({"error": str(e)}, status_code=502)
             _cache_put("vg_areas", vg)
-        data = await rt["store"].async_load() or {}
+        data = await rt.store.async_load() or {}
         return self.json(
             {"ha_areas": ha, "vg_areas": vg, "area_map": data.get("area_map", {})}
         )
@@ -202,7 +212,7 @@ class VerdiGrowAreasView(HomeAssistantView):
         action = body.get("action")
         if action == "import":
             try:
-                result = await rt["client"].async_import_areas(body.get("names", []))
+                result = await rt.client.async_import_areas(body.get("names", []))
                 _cache_clear("vg_areas", "catalog")  # areas changed
                 return self.json(result)
             except Exception as e:
@@ -219,27 +229,27 @@ class VerdiGrowAreasView(HomeAssistantView):
                 created[name] = entry.id
             return self.json({"created": created})
         if action == "map":
-            data = await rt["store"].async_load() or {}
+            data = await rt.store.async_load() or {}
             data["area_map"] = body.get("area_map", {})
-            await rt["store"].async_save(data)
+            await rt.store.async_save(data)
             return self.json({"ok": True})
         if action == "delete_vg":
             # Un-import: delete the VG area (guarded server-side) and drop any
             # stored VG→HA mapping for it. Does NOT touch the HA area.
             vg_id = body.get("id")
             try:
-                result = await rt["client"].async_delete_area(vg_id)
+                result = await rt.client.async_delete_area(vg_id)
             except Exception as e:
                 return self.json({"error": str(e)}, status_code=502)
             if result.get("ok"):
-                data = await rt["store"].async_load() or {}
+                data = await rt.store.async_load() or {}
                 amap = data.get("area_map") or {}
                 if (
                     amap.pop(str(vg_id), None) is not None
                     or amap.pop(vg_id, None) is not None
                 ):
                     data["area_map"] = amap
-                    await rt["store"].async_save(data)
+                    await rt.store.async_save(data)
                 _cache_clear("vg_areas", "catalog")
             # Guard failures ({"error": …}) come back as 200 so the panel can
             # read and show the reason (callApi rejects on non-2xx).
@@ -267,20 +277,20 @@ class VerdiGrowCardsView(HomeAssistantView):
                 return self.json(
                     _rewrite_card(
                         self.hass,
-                        await rt["client"].async_plant_card(request.query["plant"]),
+                        await rt.client.async_plant_card(request.query["plant"]),
                     )
                 )
             if request.query.get("id"):
                 return self.json(
                     _rewrite_card(
-                        self.hass, await rt["client"].async_card(request.query["id"])
+                        self.hass, await rt.client.async_card(request.query["id"])
                     )
                 )
             return self.json(
                 {
                     "cards": [
                         _rewrite_card(self.hass, c)
-                        for c in await rt["client"].async_cards()
+                        for c in await rt.client.async_cards()
                     ]
                 }
             )
@@ -309,7 +319,7 @@ class VerdiGrowPhotoView(HomeAssistantView):
         base = path.split("?")[0].lower()
         if not path.startswith("/") or not base.endswith(_IMG_EXTS):
             return web.Response(status=400)
-        data, ctype = await rt["client"].async_fetch_media(path)
+        data, ctype = await rt.client.async_fetch_media(path)
         if data is None:
             return web.Response(status=404)
         return web.Response(
@@ -333,7 +343,7 @@ class VerdiGrowDevicesView(HomeAssistantView):
         if not rt:
             return self.json({"error": "VerdiGrow not set up"}, status_code=503)
         try:
-            return self.json({"devices": await rt["client"].async_devices_all()})
+            return self.json({"devices": await rt.client.async_devices_all()})
         except Exception as e:
             return self.json({"error": str(e)}, status_code=502)
 
@@ -343,7 +353,7 @@ class VerdiGrowDevicesView(HomeAssistantView):
             return self.json({"error": "VerdiGrow not set up"}, status_code=503)
         try:
             body = await request.json()
-            result = await rt["client"].async_device_map(body)
+            result = await rt.client.async_device_map(body)
             return self.json(result)
         except Exception as e:
             return self.json({"error": str(e)}, status_code=502)
@@ -363,5 +373,5 @@ class VerdiGrowPushView(HomeAssistantView):
         rt = _runtime(self.hass)
         if not rt:
             return self.json({"error": "VerdiGrow not set up"}, status_code=503)
-        result = await rt["push"]()
+        result = await rt.push()
         return self.json({"ok": True, "pushed": result or 0})
