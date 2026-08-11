@@ -9,10 +9,11 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import VerdiGrowError
+from .api import VerdiGrowAuthError, VerdiGrowError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +59,11 @@ class VerdiGrowCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         try:
             cards = await self.client.async_cards()
+        except VerdiGrowAuthError as e:
+            # Not UpdateFailed: retrying a rejected token forever just leaves every
+            # entity unavailable with nothing on screen explaining why. This is what
+            # makes HA offer "Reconfigure" when a grower rotates their API token.
+            raise ConfigEntryAuthFailed(str(e)) from e
         except VerdiGrowError as e:
             raise UpdateFailed(str(e)) from e
         return {c["id"]: c for c in cards}

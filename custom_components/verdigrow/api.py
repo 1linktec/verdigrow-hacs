@@ -31,6 +31,16 @@ class VerdiGrowError(Exception):
     """Any VerdiGrow API failure."""
 
 
+class VerdiGrowAuthError(VerdiGrowError):
+    """The token was rejected.
+
+    Separate from the general error because the two need opposite handling: a
+    network blip should be retried, a rejected token never will be. Only this one
+    is worth interrupting the grower for, and it is what turns a rotated token
+    into a "reconfigure" prompt instead of entities that are unavailable forever.
+    """
+
+
 class VerdiGrowClient:
     def __init__(
         self, hass: HomeAssistant, url: str, token: str, verify_ssl: bool = True
@@ -49,7 +59,7 @@ class VerdiGrowClient:
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as r:
                 if r.status == 401:
-                    raise VerdiGrowError("unauthorized (check the API token)")
+                    raise VerdiGrowAuthError("unauthorized (check the API token)")
                 r.raise_for_status()
                 return await r.json()
         except VerdiGrowError:

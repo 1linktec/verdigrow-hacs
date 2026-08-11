@@ -102,6 +102,41 @@ jobs:
               sys.exit(f"{len(failed)} module(s) failed to import")
           PY
 
+      # Importing proves the modules load; it does not prove the HA helpers we CALL
+      # still exist, because those calls only run when a grower opens a dialog. A
+      # renamed config-flow helper would import cleanly and blow up in front of them.
+      - name: Check the HA APIs we depend on
+        run: |
+          python - <<'PY'
+          import sys
+          from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+          from homeassistant.components.sensor import SensorDeviceClass
+
+          missing = []
+
+          def need(obj, attr, why):
+              if not hasattr(obj, attr):
+                  missing.append(f"{obj.__name__}.{attr} — {why}")
+
+          # Reauth: HA renamed/added these fairly recently, and they are only reached
+          # when a token is actually rejected — the least-tested path there is.
+          need(ConfigFlow, "_get_reauth_entry", "reauth step looks the entry up")
+          need(ConfigFlow, "async_update_reload_and_abort", "reauth saves + reloads")
+          # runtime_data replaced hass.data[DOMAIN][entry_id]; if this ever goes away
+          # the whole setup path goes with it.
+          need(ConfigEntry, "runtime_data", "per-entry state lives here")
+          need(OptionsFlow, "config_entry", "options flow no longer stores its own")
+
+          for name in ("TEMPERATURE", "HUMIDITY", "MOISTURE", "ILLUMINANCE"):
+              if not hasattr(SensorDeviceClass, name):
+                  missing.append(f"SensorDeviceClass.{name} — used by a metric sensor")
+
+          for m in missing:
+              print(f"::error title=HA API gone::{m}")
+          print("\n".join(missing) or "All depended-on HA APIs present.")
+          sys.exit(1 if missing else 0)
+          PY
+
   hacs:
     name: HACS validation
     runs-on: ubuntu-latest

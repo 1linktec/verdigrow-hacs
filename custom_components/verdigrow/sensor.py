@@ -2,22 +2,29 @@
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.core import callback
 
 from .const import DOMAIN
 from .coordinator import VerdiGrowConfigEntry
 from .entity import VGContainerEntity
 
-# Map VerdiGrow metric keys to HA device classes where they line up.
+# Map VerdiGrow metric keys to HA device classes where they line up. Enum members
+# rather than strings, so a class HA renames or drops is an ImportError in CI
+# instead of a sensor that silently loses its icon and unit handling.
+#
+# ec and ph are absent deliberately: HA has no device class for either, and
+# inventing one costs the long-term statistics that MEASUREMENT already gives them.
 _DEVICE_CLASS = {
-    "air_temp": "temperature",
-    "soil_temp": "temperature",
-    "humidity": "humidity",
-    "soil_moisture": "moisture",
-    "light": "illuminance",
-    "ec": None,
-    "ph": None,
+    "air_temp": SensorDeviceClass.TEMPERATURE,
+    "soil_temp": SensorDeviceClass.TEMPERATURE,
+    "humidity": SensorDeviceClass.HUMIDITY,
+    "soil_moisture": SensorDeviceClass.MOISTURE,
+    "light": SensorDeviceClass.ILLUMINANCE,
 }
 
 

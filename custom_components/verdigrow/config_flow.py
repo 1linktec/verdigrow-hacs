@@ -26,6 +26,26 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# A token is a secret, so the field hides it and offers an eye to reveal — the same
+# treatment as a password. Typing one blind is how a typo becomes "cannot connect".
+TOKEN_SELECTOR = selector.TextSelector(
+    selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+)
+
+
+async def _check(hass, url, token, verify_ssl):
+    """Try the connection. Returns (error_key, detail) — (None, "") if it worked."""
+    client = VerdiGrowClient(hass, url, token, verify_ssl)
+    try:
+        await client.async_ping()
+    except VerdiGrowError as e:
+        detail = str(e)
+        _LOGGER.warning("VerdiGrow connect failed: %s", detail)
+        return (
+            "invalid_auth" if "unauthorized" in detail else "cannot_connect"
+        ), detail
+    return None, ""
+
 
 class VerdiGrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
@@ -35,20 +55,14 @@ class VerdiGrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         detail = ""
         data = user_input or {}
         if user_input is not None:
-            client = VerdiGrowClient(
+            err, detail = await _check(
                 self.hass,
                 user_input[CONF_URL],
                 user_input[CONF_TOKEN],
                 user_input.get(CONF_VERIFY_SSL, True),
             )
-            try:
-                await client.async_ping()
-            except VerdiGrowError as e:
-                detail = str(e)
-                _LOGGER.warning("VerdiGrow connect failed: %s", detail)
-                errors["base"] = (
-                    "invalid_auth" if "unauthorized" in detail else "cannot_connect"
-                )
+            if err:
+                errors["base"] = err
             else:
                 await self.async_set_unique_id(user_input[CONF_URL])
                 self._abort_if_unique_id_configured()
@@ -57,7 +71,9 @@ class VerdiGrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(CONF_URL, default=data.get(CONF_URL, "")): str,
-                vol.Required(CONF_TOKEN, default=data.get(CONF_TOKEN, "")): str,
+                vol.Required(
+                    CONF_TOKEN, default=data.get(CONF_TOKEN, "")
+                ): TOKEN_SELECTOR,
                 vol.Required(
                     CONF_VERIFY_SSL, default=data.get(CONF_VERIFY_SSL, True)
                 ): bool,
@@ -70,42 +86,80 @@ class VerdiGrowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"detail": detail},
         )
 
+    async def async_step_reauth(self, entry_data):
+        """The stored token stopped being accepted."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input=None):
+        """Ask for a new token, keeping the URL that already works.
+
+        Without this, rotating the API token in VerdiGrow leaves every entity
+        unavailable and nothing on screen saying why — the grower has to guess that
+        the fix lives in the options flow. HA raises this automatically once the
+        coordinator reports ConfigEntryAuthFailed.
+        """
+        entry = self._get_reauth_entry()
+        errors = {}
+        detail = ""
+        if user_input is not None:
+            err, detail = await _check(
+                self.hass,
+                entry.data[CONF_URL],
+                user_input[CONF_TOKEN],
+                entry.data.get(CONF_VERIFY_SSL, True),
+            )
+            if err:
+                errors["base"] = err
+            else:
+                # Updates the entry and reloads it in one step, which is what makes
+                # the entities come back without the grower restarting anything.
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={CONF_TOKEN: user_input[CONF_TOKEN]}
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_TOKEN): TOKEN_SELECTOR}),
+            errors=errors,
+            description_placeholders={
+                "url": entry.data[CONF_URL],
+                "detail": detail,
+            },
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(entry):
-        return VerdiGrowOptionsFlow(entry)
+        return VerdiGrowOptionsFlow()
 
 
 class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
-    def __init__(self, entry) -> None:
-        self.entry = entry
-        self._options = dict(entry.options)
+    """Edit the connection and the push interval.
+
+    Takes no entry: `self.config_entry` is provided by the base class. Storing our
+    own copy was the older pattern and HA now warns about it — a held reference can
+    also go stale if the entry is updated while the dialog is open.
+    """
 
     async def async_step_init(self, user_input=None):
         errors = {}
         detail = ""
-        data = {**self.entry.data}
+        self._options = dict(self.config_entry.options)
+        data = {**self.config_entry.data}
         if user_input is not None:
             # Validate the (possibly changed) endpoint before saving.
-            client = VerdiGrowClient(
+            err, detail = await _check(
                 self.hass,
                 user_input[CONF_URL],
                 user_input[CONF_TOKEN],
                 user_input.get(CONF_VERIFY_SSL, True),
             )
-            try:
-                await client.async_ping()
-            except VerdiGrowError as e:
-                detail = str(e)
-                _LOGGER.warning("VerdiGrow reconnect failed: %s", detail)
-                errors["base"] = (
-                    "invalid_auth" if "unauthorized" in detail else "cannot_connect"
-                )
+            if err:
+                errors["base"] = err
             else:
                 # Persist the connection (URL/token/verify-SSL) to entry.data; the
                 # entry update listener (_reload_on_options) reloads to apply it.
                 self.hass.config_entries.async_update_entry(
-                    self.entry,
+                    self.config_entry,
                     data={
                         CONF_URL: user_input[CONF_URL],
                         CONF_TOKEN: user_input[CONF_TOKEN],
@@ -119,7 +173,9 @@ class VerdiGrowOptionsFlow(config_entries.OptionsFlow):
         schema = vol.Schema(
             {
                 vol.Required(CONF_URL, default=data.get(CONF_URL, "")): str,
-                vol.Required(CONF_TOKEN, default=data.get(CONF_TOKEN, "")): str,
+                vol.Required(
+                    CONF_TOKEN, default=data.get(CONF_TOKEN, "")
+                ): TOKEN_SELECTOR,
                 vol.Required(
                     CONF_VERIFY_SSL, default=data.get(CONF_VERIFY_SSL, True)
                 ): bool,

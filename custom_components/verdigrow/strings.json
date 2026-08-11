@@ -9,6 +9,13 @@
           "token": "API token",
           "verify_ssl": "Verify SSL certificate (uncheck for self-signed / untrusted proxy certs)"
         }
+      },
+      "reauth_confirm": {
+        "title": "VerdiGrow token rejected",
+        "description": "VerdiGrow at {url} no longer accepts the stored API token. Generate a new one in VerdiGrow → Garden Setup → API access and paste it below. {detail}",
+        "data": {
+          "token": "API token"
+        }
       }
     },
     "error": {
@@ -16,7 +23,8 @@
       "invalid_auth": "Token rejected: {detail}"
     },
     "abort": {
-      "already_configured": "This VerdiGrow instance is already configured."
+      "already_configured": "This VerdiGrow instance is already configured.",
+      "reauth_successful": "Reconnected to VerdiGrow."
     }
   },
   "options": {
