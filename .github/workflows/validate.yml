@@ -46,10 +46,14 @@ jobs:
       # the code works on HA today and say nothing about the oldest version we promise
       # to support — which is the one that breaks for somebody.
       - run: pip install "homeassistant==2025.6.0"
+      # Failures are emitted as ::error:: annotations and into the job summary, not
+      # just onto stdout. Job logs need admin rights to download; annotations and the
+      # summary are readable by anyone who can see the run, which is the difference
+      # between "CI is red" and knowing why.
       - name: Import every module
         run: |
           python - <<'PY'
-          import importlib, pathlib, sys
+          import importlib, os, pathlib, sys, traceback
           sys.path.insert(0, "custom_components")
           mods = sorted(p.stem for p in pathlib.Path(
               "custom_components/verdigrow").glob("*.py") if p.stem != "__init__")
@@ -59,10 +63,22 @@ jobs:
                   importlib.import_module(name)
                   print(f"ok   {name}")
               except Exception as e:
-                  failed.append(f"{name}: {type(e).__name__}: {e}")
-                  print(f"FAIL {name}: {type(e).__name__}: {e}")
+                  tb = traceback.format_exc()
+                  failed.append((name, f"{type(e).__name__}: {e}", tb))
+                  # %0A is how a multi-line annotation is encoded; without it
+                  # everything after the first newline is silently dropped.
+                  print(f"::error title=import {name}::"
+                        + tb.replace("\n", "%0A"))
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a") as fh:
+                  fh.write("## Import check\n\n")
+                  if not failed:
+                      fh.write(f"All {len(mods) + 1} modules imported.\n")
+                  for name, msg, tb in failed:
+                      fh.write(f"### {name}\n\n`{msg}`\n\n```\n{tb}\n```\n\n")
           if failed:
-              sys.exit("\n".join(failed))
+              sys.exit(f"{len(failed)} module(s) failed to import")
           PY
 
   hacs:
