@@ -18,6 +18,7 @@ from .const import (
     API_DEVICE_USAGE,
     API_DEVICES,
     API_METRIC_TYPES,
+    API_NOTIFICATIONS,
     API_PING,
     API_PLANTS,
     API_READINGS,
@@ -148,6 +149,17 @@ class VerdiGrowClient:
                 return await r.json()
         except Exception as e:
             raise VerdiGrowError(str(e)) from e
+
+    async def async_notifications(self, since: int | None = None) -> list[dict]:
+        """Open notifications, newest last.
+
+        `since` is the highest id already seen — the Companion filters server-side, so
+        a quiet garden costs one small response rather than the whole list every poll.
+        """
+        path = API_NOTIFICATIONS
+        if since:
+            path = f"{path}?since={int(since)}"
+        return (await self._get(path)).get("notifications", [])
 
     async def async_devices(self) -> list[dict]:
         """Devices to track for running-cost — each with its HA entity links,

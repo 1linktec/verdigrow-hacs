@@ -54,6 +54,7 @@ from .http_api import (
     VerdiGrowPhotoView,
     VerdiGrowPushView,
 )
+from .notifications import NotificationPoller
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -455,6 +456,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _manage_devices()  # prune any devices for containers already gone
+
+    # Notifications: pulled from the Companion, raised locally. See notifications.py
+    # for why this cannot be a push.
+    poller = NotificationPoller(hass, client)
+    entry.async_on_unload(await poller.async_start())
 
     entry.async_on_unload(entry.add_update_listener(_reload_on_options))
     hass.async_create_task(_push())

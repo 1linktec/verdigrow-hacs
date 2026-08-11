@@ -92,3 +92,34 @@ and latest metrics.
 
 This Home Assistant integration is open source and free to use. The VerdiGrow
 platform it connects to is a separate, proprietary product.
+
+
+## Notifications
+
+Frost warnings, out-of-range readings and silent sensors are raised in Home Assistant.
+
+The important ones appear as **persistent notifications** with nothing to configure.
+Every notification also fires a **`verdigrow_notification`** event, so you can route
+them wherever you already send things:
+
+```yaml
+automation:
+  - alias: VerdiGrow alerts to my phone
+    trigger:
+      platform: event
+      event_type: verdigrow_notification
+    condition: "{{ trigger.event.data.important }}"
+    action:
+      service: notify.mobile_app_my_phone
+      data:
+        title: "{{ trigger.event.data.title }}"
+        message: "{{ trigger.event.data.body }}"
+```
+
+Event data: `id`, `type`, `title`, `body`, `container`, `plant`, `area`, `important`.
+`type` is one of `frost`, `metric_low`, `metric_high`, `sensor_silent`, `harvest`,
+`watering`, `ai_ready`.
+
+An event is fired rather than a notify service being called directly, because the
+integration cannot know which notifiers exist on your system — and a hardcoded service
+name fails silently on any setup that renamed it.

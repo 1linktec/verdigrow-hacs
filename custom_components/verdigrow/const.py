@@ -39,3 +39,17 @@ API_READINGS = "/api/readings/"
 API_DEVICES = "/api/devices/"
 API_DEVICE_MAP = "/api/devices/map/"
 API_DEVICE_USAGE = "/api/device-usage/"
+API_NOTIFICATIONS = "/api/notifications/"
+
+# Notifications are PULLED. VerdiGrow never calls Home Assistant — a hosted Companion
+# sits on the internet and HA sits behind the grower's router, so a push would work on
+# a LAN and nowhere else.
+NOTIFY_POLL_SECONDS = 300
+# Where the last-seen id lives, so a restart doesn't replay what was already read.
+STORAGE_KEY_NOTIFY = "verdigrow_notifications"
+
+# Fired for every new notification, so a grower can route them however they already
+# route everything else — phone, speaker, light. Firing an event rather than calling a
+# notify service is the idiomatic choice: we do not know which notifiers exist, and
+# guessing `notify.notify` fails silently on any setup that renamed it.
+EVENT_NOTIFICATION = "verdigrow_notification"
