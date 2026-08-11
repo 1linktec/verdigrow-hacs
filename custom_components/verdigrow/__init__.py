@@ -232,6 +232,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = VerdiGrowCoordinator(hass, client, interval)
     await coordinator.async_config_entry_first_refresh()
 
+    # A SINGLE shared slot, and that is only safe because the integration is declared
+    # `single_config_entry` in manifest.json (Jeff, 2026-08-11: only one Companion will
+    # ever be wired into Home Assistant).
+    #
+    # Without that declaration this is a real bug: every entry overwrites it, and the
+    # sensor-mapping panel reads it — so with two Companions configured, mapping a
+    # sensor would silently write into whichever one happened to load last. The
+    # per-entry data below is keyed by entry_id and the panel/view registration is
+    # guarded, so multi-entry was clearly intended; this one slot was missed.
+    #
+    # If a second Companion is ever supported, this must be keyed by entry_id and the
+    # panel must ask which one it is configuring. Do not simply un-declare
+    # single_config_entry.
     hass.data[DOMAIN]["runtime"] = {
         "client": client,
         "store": store,
