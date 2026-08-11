@@ -115,7 +115,16 @@ jobs:
           missing = []
 
           def need(obj, attr, why):
-              if not hasattr(obj, attr):
+              # hasattr alone is not enough. Attributes that only ever exist on an
+              # INSTANCE — declared via __slots__ or a bare annotation, which is how
+              # ConfigEntry.runtime_data is defined — are absent from the class, so
+              # hasattr reports them missing when they are perfectly fine.
+              present = (
+                  hasattr(obj, attr)
+                  or attr in getattr(obj, "__annotations__", {})
+                  or attr in getattr(obj, "__slots__", ())
+              )
+              if not present:
                   missing.append(f"{obj.__name__}.{attr} — {why}")
 
           # Reauth: HA renamed/added these fairly recently, and they are only reached
