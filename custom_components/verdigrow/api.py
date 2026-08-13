@@ -163,8 +163,13 @@ class VerdiGrowClient:
     async def async_notifications(self, since: int | None = None) -> list[dict]:
         """Open notifications, newest last.
 
-        `since` is the highest id already seen — the Companion filters server-side, so
-        a quiet garden costs one small response rather than the whole list every poll.
+        The poller calls this with no `since`, on purpose: it needs the whole open set
+        to work out what has been *dealt with* since last time, not just what is new.
+        Filtering server-side would save a little bandwidth and lose the ability to
+        clear a reminder the grower has already acted on.
+
+        `since` stays available because the endpoint supports it and it is the right
+        call for any consumer that only ever wants what is new.
         """
         path = API_NOTIFICATIONS
         if since:

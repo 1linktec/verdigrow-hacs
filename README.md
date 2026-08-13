@@ -120,6 +120,10 @@ Event data: `id`, `type`, `title`, `body`, `container`, `plant`, `area`, `import
 `type` is one of `frost`, `metric_low`, `metric_high`, `sensor_silent`, `harvest`,
 `watering`, `ai_ready`.
 
+Persistent notifications **clear themselves** once you deal with the thing in VerdiGrow —
+water the bucket and the reminder disappears from Home Assistant too, so you never clear
+the same chore twice.
+
 An event is fired rather than a notify service being called directly, because the
 integration cannot know which notifiers exist on your system — and a hardcoded service
 name fails silently on any setup that renamed it.
