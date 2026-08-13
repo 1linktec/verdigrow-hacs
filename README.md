@@ -94,6 +94,12 @@ This Home Assistant integration is open source and free to use. The VerdiGrow
 platform it connects to is a separate, proprietary product.
 
 
+## The VerdiGrow icon
+
+From **Home Assistant 2026.3** the icon and logo ship inside the integration
+(`custom_components/verdigrow/brand/`) and appear with no setup. On older Home Assistant
+versions you'll see the generic placeholder instead — cosmetic only, nothing else differs.
+
 ## Notifications
 
 Frost warnings, out-of-range readings and silent sensors are raised in Home Assistant.
