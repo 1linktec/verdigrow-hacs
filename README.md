@@ -100,6 +100,19 @@ From **Home Assistant 2026.3** the icon and logo ship inside the integration
 (`custom_components/verdigrow/brand/`) and appear with no setup. On older Home Assistant
 versions you'll see the generic placeholder instead — cosmetic only, nothing else differs.
 
+## Which sensors become Home Assistant entities
+
+VerdiGrow creates an entity only for readings **it is the origin of** — values you entered
+by hand. Readings that came *from* Home Assistant, or arrived over MQTT, do not get an
+entity: the HA one already exists (it's where the value came from), and a bridged PLC with
+a few hundred tags would otherwise mint a few hundred new entities.
+
+Those values are still there:
+
+- on the **VerdiGrow card**, with how long ago they were read
+- as attributes on the container's `plants` sensor, e.g.
+  `{{ state_attr('sensor.bed_1_plants', 'metrics').soil_moisture.value }}`
+
 ## Notifications
 
 Frost warnings, out-of-range readings and silent sensors are raised in Home Assistant.

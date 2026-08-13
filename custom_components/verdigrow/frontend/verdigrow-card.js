@@ -19,6 +19,7 @@ const CARD_STYLE = `
   .vg-chip{display:inline-block;background:var(--secondary-background-color,#eee);border-radius:10px;padding:1px 8px;font-size:12px}
   .vg-dim{color:var(--secondary-text-color)}
   .vg-metrics{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0}
+  .vg-stale{opacity:.6}
   .vg-plant{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--divider-color,#eee)}
   .vg-pimg{width:52px;height:52px;object-fit:cover;border-radius:8px;flex:0 0 auto}
   .vg-noimg{display:flex;align-items:center;justify-content:center;background:var(--secondary-background-color,#eee);font-size:22px}
@@ -89,9 +90,32 @@ class VerdiGrowCard extends HTMLElement {
     else this._renderContainer();
   }
 
+  // How long ago a reading was taken, short enough for a chip. Returns "" for
+  // anything under a minute — "3s ago" on a live sensor is just noise.
+  _age(iso) {
+    if (!iso) return "";
+    const then = Date.parse(iso);
+    if (isNaN(then)) return "";
+    const mins = Math.floor((Date.now() - then) / 60000);
+    if (mins < 1) return "";
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h`;
+    return `${Math.floor(hrs / 24)}d`;
+  }
+
   _metricsHtml(c) {
-    return (c.metrics || []).map((m) =>
-      `<span class="vg-chip">${esc(m.name)}: ${m.value}${esc(m.unit || "")}</span>`).join("");
+    // The age matters more than it looks. Metrics sourced from Home Assistant or MQTT
+    // deliberately have no HA entity behind them (#33), so this chip is the only place
+    // the value is shown — and a dead probe reads 22.4°C forever. Anything over a day
+    // old is dimmed rather than hidden: still shown, but not trusted at a glance.
+    return (c.metrics || []).map((m) => {
+      const age = this._age(m.at);
+      const stale = age.endsWith("d");
+      const suffix = age ? ` <span class="vg-dim">· ${age}</span>` : "";
+      return `<span class="vg-chip${stale ? " vg-stale" : ""}">` +
+        `${esc(m.name)}: ${m.value}${esc(m.unit || "")}${suffix}</span>`;
+    }).join("");
   }
 
   _renderContainer() {
