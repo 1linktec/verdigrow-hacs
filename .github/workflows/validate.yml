@@ -154,7 +154,3 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # The brands check needs verdigrow to be merged into home-assistant/brands
-          # (BUG_REPORT #16 — the "icon not available" in HA). Ignored so the rest of
-          # the validation is usable until that PR lands; remove this line once it has.
-          ignore: brands
