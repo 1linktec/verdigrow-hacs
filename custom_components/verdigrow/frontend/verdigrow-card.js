@@ -23,7 +23,14 @@ const CARD_STYLE = `
   .vg-plant{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--divider-color,#eee)}
   .vg-pimg{width:52px;height:52px;object-fit:cover;border-radius:8px;flex:0 0 auto}
   .vg-noimg{display:flex;align-items:center;justify-content:center;background:var(--secondary-background-color,#eee);font-size:22px}
-  .vg-note{font-size:13px;color:var(--secondary-text-color);white-space:pre-wrap;margin-top:2px}`;
+  .vg-note{font-size:13px;color:var(--secondary-text-color);white-space:pre-wrap;margin-top:2px}
+  .vg-noteq{font-size:12px;color:var(--secondary-text-color);opacity:.75;margin-top:2px}
+  .vg-notehead{display:flex;gap:6px;align-items:center;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--secondary-text-color);margin-top:6px}
+  .vg-ai{background:var(--primary-color,#4a7);color:#fff;border-radius:8px;padding:0 6px;font-size:10px}
+  /* An AI answer runs to paragraphs. Unclamped it pushes the plants, the chart and
+     the metrics off the bottom of the card — the reason #19 was raised. Clamped to
+     six lines; the full text is one tap away in VerdiGrow. */
+  .vg-clamp{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}`;
 
 class VerdiGrowCard extends HTMLElement {
   setConfig(config) {
@@ -104,6 +111,26 @@ class VerdiGrowCard extends HTMLElement {
     return `${Math.floor(hrs / 24)}d`;
   }
 
+  // One note, the most recent — the API returns a single latest note, never a
+  // history (#19). An Ask-AI exchange is stored as "Q: …\n\nA: …" in one note, so
+  // split it and lead with the answer: the question is context, the answer is the
+  // point, and rendering the raw blob is what made the card look like a transcript.
+  _noteHtml(note, at) {
+    if (!note) return "";
+    const age = this._age(at);
+    const stamp = age ? ` <span class="vg-dim">· ${age} ago</span>` : "";
+    const m = /^Q:\s*([\s\S]*?)\n\nA:\s*([\s\S]*)$/.exec(note.trim());
+    if (!m) {
+      return `<div class="vg-note">${esc(note)}</div>`;
+    }
+    const [, question, answer] = m;
+    const pending = answer.trim().startsWith("⏳");
+    return `<div class="vg-notehead"><span class="vg-ai">AI</span>` +
+      `<span>${pending ? "thinking…" : "answer"}</span>${stamp}</div>` +
+      `<div class="vg-note vg-clamp">${esc(answer.trim())}</div>` +
+      `<div class="vg-noteq">asked: ${esc(question.trim())}</div>`;
+  }
+
   _metricsHtml(c) {
     // The age matters more than it looks. Metrics sourced from Home Assistant or MQTT
     // deliberately have no HA entity behind them (#33), so this chip is the only place
@@ -136,7 +163,7 @@ class VerdiGrowCard extends HTMLElement {
         ${p.photo_url ? `<img class="vg-pimg" src="${esc(p.photo_url)}" loading="lazy">` : `<div class="vg-pimg vg-noimg">🌱</div>`}
         <div style="flex:1"><div><b>${esc(p.label)}</b></div>
           <div class="vg-dim">${esc(p.status)} · ${esc(p.where)}</div>
-          ${p.note ? `<div class="vg-note">${esc(p.note)}</div>` : ""}</div></div>`).join("")
+          ${this._noteHtml(p.note, p.note_at)}</div></div>`).join("")
       || '<div class="vg-dim">No plants.</div>';
     this.innerHTML = `<ha-card header="${esc(c.label)}"><style>${CARD_STYLE}</style>
       <div class="vg-body">
@@ -156,7 +183,7 @@ class VerdiGrowCard extends HTMLElement {
       <div class="vg-body">
         <div class="vg-sub">${esc(c.crop)} ${esc(c.variety)} · ${esc(c.status)}${c.days_to_maturity ? " · " + c.days_to_maturity + "d" : ""} · in ${esc(c.where)}</div>
         ${c.image_url ? `<img class="vg-hero" src="${esc(c.image_url)}" loading="lazy">` : ""}
-        ${c.note ? `<div class="vg-note">${esc(c.note)}</div>` : ""}
+        ${this._noteHtml(c.note, c.note_at)}
         ${seed}
         ${c.metrics && c.metrics.length ? `<div class="vg-metrics">${this._metricsHtml(c)}</div>` : ""}
       </div></ha-card>`;
