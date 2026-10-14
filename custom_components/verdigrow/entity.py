@@ -47,8 +47,8 @@ class VGContainerEntity(CoordinatorEntity[VerdiGrowCoordinator]):
         # device, so setting this on every refresh can't drag it back.
         if card.get("area"):
             info["suggested_area"] = card["area"]
-        # A bed row hangs off its bed, so the device page shows the nesting the
-        # grower actually built rather than a flat list.
-        if card.get("parent_id"):
-            info["via_device"] = container_device_id(card["parent_id"])
+        # No via_device here. A bed row does hang off its bed, but HA deprecated the
+        # identifier-tuple form (stops working in 2027.8) for the parent's registry
+        # id, which an entity can't know until the bed's device exists.
+        # _manage_devices in __init__.py sets the link once both are registered.
         return info

@@ -230,15 +230,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: VerdiGrowConfigEntry) ->
     # out of the data (their device is removed below); uninstall removes all
     # entities (they're registered under this config entry).
     interval = int(entry.options.get(CONF_INTERVAL, DEFAULT_INTERVAL))
-    coordinator = VerdiGrowCoordinator(hass, client, interval)
+    coordinator = VerdiGrowCoordinator(hass, entry, client, interval)
     await coordinator.async_config_entry_first_refresh()
 
     @callback
     def _manage_devices():
-        """Remove devices for containers deleted in VerdiGrow; keep names in sync."""
+        """Remove devices for containers deleted in VerdiGrow; keep names and the
+        bed → row nesting in sync."""
         data = coordinator.data or {}
         reg = dr_helper.async_get(hass)
-        for device in dr_helper.async_entries_for_config_entry(reg, entry.entry_id):
+        devices = dr_helper.async_entries_for_config_entry(reg, entry.entry_id)
+        # Container id → HA device id, so a row can point at its bed. HA wants the
+        # parent's registry id (via_device_id); the identifier-tuple via_device in
+        # DeviceInfo is deprecated and stops working in 2027.8.
+        by_cid = {
+            ident: device.id
+            for device in devices
+            for domain, ident in device.identifiers
+            if domain == DOMAIN
+        }
+        for device in devices:
             cid = None
             for domain, ident in device.identifiers:
                 if domain == DOMAIN and ident.startswith("container_"):
@@ -252,12 +263,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: VerdiGrowConfigEntry) ->
             card = data.get(cid)
             if card is None:
                 reg.async_remove_device(device.id)  # gone in VerdiGrow → remove
-            elif (
+                continue
+            if (
                 card.get("label")
                 and device.name != card["label"]
                 and not device.name_by_user
             ):
                 reg.async_update_device(device.id, name=card["label"])  # renamed
+            # A bed row hangs off its bed, so the device page shows the nesting the
+            # grower built rather than a flat list. A parent not registered yet is
+            # picked up on the next refresh; a row that lost its parent is unlinked.
+            parent = card.get("parent_id")
+            via = by_cid.get(f"container_{parent}") if parent else None
+            if (via or not parent) and device.via_device_id != via:
+                reg.async_update_device(device.id, via_device_id=via)
 
     entry.async_on_unload(coordinator.async_add_listener(_manage_devices))
 

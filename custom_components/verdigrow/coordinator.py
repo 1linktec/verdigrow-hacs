@@ -47,10 +47,13 @@ VerdiGrowConfigEntry = ConfigEntry[VerdiGrowData]
 class VerdiGrowCoordinator(DataUpdateCoordinator):
     """Fetches all containers (as cards) and keys them by id."""
 
-    def __init__(self, hass, client, interval):
+    def __init__(self, hass, entry, client, interval):
         super().__init__(
             hass,
             _LOGGER,
+            # Explicit, not picked up from HA's ContextVar — HA only still tolerates
+            # that for custom integrations.
+            config_entry=entry,
             name="VerdiGrow containers",
             update_interval=timedelta(seconds=max(300, int(interval))),
         )
